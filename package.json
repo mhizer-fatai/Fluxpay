@@ -1,0 +1,20 @@
+{
+  "name": "fluxpay-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fluxpay — consumer payments app on Monad (Metropolis 2026, Track 2)",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev -w frontend",
+    "dev:backend": "npm run dev -w backend",
+    "build:frontend": "npm run build -w frontend",
+    "build:backend": "npm run build -w backend",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,36 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# builds / caches
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# env & secrets — never commit
+.env
+.env.local
+.env.*.local
+.env.backend
+!.env.example
+!.env.template
+
+# foundry
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+contracts/lib/
+
+# db / infra runtime
+infra/data/
+*.log
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

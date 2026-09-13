@@ -1,0 +1,12 @@
+# Committed deploy artifacts live here per network (chainId.json) after CREATE2 deploy.
+# Schema:
+# {
+#   "chainId": 10143,
+#   "mockUSDC": "0x...",
+#   "usernameRegistry": "0x...",
+#   "fluxPay": "0x...",
+#   "splitManager": "0x...",
+#   "paymentLinkEscrow": "0x...",
+#   "streamVault": "0x...",
+#   "deployBlock": 0
+# }

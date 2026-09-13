@@ -1,0 +1,14 @@
+{
+  "chainId": 10143,
+  "network": "monad-testnet",
+  "deployer": "0xeB3DD0faF85FC7C6aB13B41cC9371b1FE0797842",
+  "deployedAt": "2026-09-12",
+  "contracts": {
+    "mockUSDC": "0x134f0588429c1075D56f4a232d02607E865c6e6B",
+    "usernameRegistry": "0x5437778A1E4E39be2DAa4dA1FADD253923B824d1",
+    "fluxPay": "0x3148a4deeEF4642cfA68CF2b0F35FDd62e98CF7E",
+    "splitManager": "0x7321909c7fA49B1bad2D4c30A8068CeBffD97827",
+    "paymentLinkEscrow": "0xd5F6Ba19aB2aFE91A4b8c162feF1d6015F266238",
+    "streamVault": "0x3791a605a5ED68e9e7923796Fd71ADE40E77Da13"
+  }
+}
