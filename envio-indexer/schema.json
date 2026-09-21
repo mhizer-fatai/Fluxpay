@@ -1,0 +1,31 @@
+{
+  "name": "Fluxpay Indexer",
+  "version": "1.0.0",
+  "description": "Envio indexer for Fluxpay on Monad testnet",
+  "contracts": {
+    "FluxPay": {
+      "address": "0x3148a4deeEF4642cfA68CF2b0F35FDd62e98CF7E",
+      "events": ["Transfer", "Approval", "Settle"]
+    },
+    "PaymentLinkEscrow": {
+      "address": "0xd5F6Ba19aB2aFE91A4b8c162feF1d6015F266238",
+      "events": ["Deposit", "Claim", "Refund"]
+    },
+    "StreamVault": {
+      "address": "0x3791a605a5ED68e9e7923796Fd71ADE40E77Da13",
+      "events": ["Create", "Withdraw", "Pause", "Resume", "TopUp", "Cancel"]
+    },
+    "SplitManager": {
+      "address": "0x7321909c7fA49B1bad2D4c30A8068CeBffD97827",
+      "events": ["Disburse"]
+    },
+    "UsernameRegistry": {
+      "address": "0x5437778A1E4E39be2DAa4dA1FADD253923B824d1",
+      "events": ["Register", "Transfer", "Resolve"]
+    },
+    "MockUSDC": {
+      "address": "0x534b2f3A21130d7a60830c2Df862319e593943A3",
+      "events": ["Transfer"]
+    }
+  }
+}

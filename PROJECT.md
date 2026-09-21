@@ -44,22 +44,18 @@ x402, AUSD, Chainlink CRE, AI commands (all post-core, bounty-driven stretch).
   Mainnet chain ID `143`.
 - **Language/stack:** Solidity (Foundry) · TypeScript (Node/Next.js) · Next.js PWA frontend ·
   Postgres + Redis backend · Envio or log-polling indexer.
-- **Accounts (IMPORTANT — research corrected this):**
-  - **Mera** (`@category-labs/mera`) derives a **regular EOA** from the passkey via WebAuthn PRF
-    (BIP-44). It is **NOT** an ERC-4337 smart account, has **no gas sponsorship**, requires
-    HTTPS, PRF-capable authenticators (desktop Chrome = Google Password Manager only), and is
-    **bound to its domain (`rpId`)** — lock the demo domain early.
-  - **Path A (preferred):** Mera EOA + **EIP-7702** delegation (supported on Monad, tx type
-    `0x04`) to a session/batch account → gas sponsorship + batched splits. Caveats: delegated
-    EOAs can't dip below 10 MON reserve; delegated code can't `CREATE`/`CREATE2`.
-  - **Path B (fallback):** **Privy + Pimlico** Kernel smart wallet (EntryPoint v0.7) — Monad's
-    official documented gasless stack with a template
-    (`monad-developers/next-serwist-privy-smart-wallet`). **Decision rule: spike Path A on
-    Day 1 for 2 hours; if not clean, ship Path B.**
+- **Accounts (locked: Privy-only):**
+  - **Privy** is the single auth + wallet stack — social logins (Google, X, Apple,
+    email) and passkey login converge on one embedded Kernel smart account
+    (EntryPoint v0.7) per user, with gas sponsored by the **Pimlico** paymaster
+    and native batched calls for splits. Template:
+    (`monad-developers/next-serwist-privy-smart-wallet`).
+  - **Mera dropped:** passkey-only (no social logins), PRF-authenticator friction,
+    no gas sponsorship. Forfeits the Mera bounties; keeps the stack to one provider.
 - **Gas:** Monad charges `gas_limit`, **not** `gas_used`. Never rely on `eth_estimateGas` in the
   hot path — maintain a hardcoded `gasTable[selector] → limit`.
 - **P256 precompile:** available at `0x0100` (EIP-7951) for on-chain WebAuthn verification if
-  needed later; Mera itself doesn't use it.
+  needed later.
 - **Contract addresses (canonical, same on testnet+mainnet):** EntryPoint v0.7
   `0x0000000071727De22E5E9d8BAf0edAc6f37da032`, Multicall3 `0xcA11...CA11`, Permit2
   `0x0000...78ba3`, CreateX `0xba5E...a5Ed`. Full table in `SYSTEM_DESIGN.md` Appendix A.
@@ -88,7 +84,7 @@ fluxpay/
 | Problem research + track selection | ✅ Done |
 | Product scope (Pay/Streams/Activity) | ✅ Done |
 | System design (SYSTEM_DESIGN.md) | ✅ Done, Monad params verified against docs |
-| Monad platform verification | ✅ Done (chain IDs, EntryPoints, P256 `0x0100`, gas model, Mera/7702/Privy paths) |
+| Monad platform verification | ✅ Done (chain IDs, EntryPoints, P256 `0x0100`, gas model, Privy path; Mera evaluated and dropped) |
 | 7-day sprint plan (PLAN.md) | ✅ Done |
 | **Code scaffold** | ⏳ **Not started** — this is the next step |
 | Team registration at hackathon.monad.xyz | ⏳ Do immediately |
@@ -103,7 +99,8 @@ fluxpay/
 3. Test against Monad testnet (chain 10143) with mock USDC first.
 4. Daily demoable increments (see `PLAN.md`); the demo script is in both `PLAN.md` and the PDF.
 5. When adding bounty integrations, prefer the ones in `SYSTEM_DESIGN.md` §11 of the brief:
-   Mera ($2.5k×2), Agora AUSD ($10k cross-border), Chainlink CRE ($3k), Envio ($1k), Privy/Dynamic ($5k).
+   Mera dropped (Privy-only decision); bounties in play:
+   Privy ($5k), Agora AUSD ($10k cross-border), Chainlink CRE ($3k), Envio ($1k), Dynamic ($5k fallback).
 
 ## 8. Open questions (block nothing)
 

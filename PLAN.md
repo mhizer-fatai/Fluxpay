@@ -7,21 +7,14 @@
 
 ## Scope for the sprint (ruthlessly cut)
 
-**IN:** passkey onboarding (Mera) · send by username · payment link · split · StreamVault (per-second billing) · live activity feed · demo video
+**IN:** Privy auth (social + passkey, one wallet) · send by username · payment link · split · StreamVault (per-second billing) · live activity feed · demo video
 **OUT (cut from the 6-week version):** x402 endpoint · Agora AUSD integration · Chainlink CRE automation · Aurora Intents · Kimi/Qwen commands · group management beyond one-tap split
 
-### Account decision (lock on Day 1, 2-hour spike)
+### Account decision (locked: Privy-only)
 
-Research corrected our assumption: **Mera derives a regular EOA from the passkey (WebAuthn PRF)** — it is **not** a 4337 smart account, has **no built-in gas sponsorship**, and needs PRF-capable passkeys (Google Password Manager on desktop Chrome; iCloud Keychain/1Password elsewhere). Meanwhile **Privy + Pimlico** is Monad's official documented gasless stack (Kernel + EntryPoint v0.7, sponsored userOps, native batching) with a ready template.
+**Privy is the single auth + wallet stack** — social logins (Google, X, Apple, email) and passkey login converge on one embedded wallet per user. Smart accounts (Kernel + EntryPoint v0.7) give built-in gas sponsorship via the Pimlico paymaster and native batched calls (splits). No Mera: Mera is passkey-only (no social logins) with authenticator friction (PRF support) and no gas sponsorship — dropped in favor of one provider doing both. This forfeits the Mera bounties ($2.5k×2); Privy bounty ($5k) stays in play.
 
-| Path | Stack | Gasless? | Notes |
-|---|---|---|---|
-| **A (hybrid, preferred)** | Mera EOA + **EIP-7702 delegation** to a session/batch account | Yes, via sponsor | Targets Mera bounty; 7702 supported on Monad (tx type 0x04); a delegated EOA with 0 MON can still be called by a sponsor |
-| **B (fallback)** | **Privy + Pimlico** smart wallet | Yes, built-in | Official Monad template `next-serwist-privy-smart-wallet`; battle-tested; also a bounty |
-
-**7702 caveats (verified):** a *delegated* EOA can't have its MON balance dip below **10 MON** (reserve rule — fine, our users hold ~0 MON); delegated code can't use `CREATE`/`CREATE2`.
-
-**Do Day 1:** 2-hour spike of Path A (Mera login + 7702 delegation + one sponsored send). If it's not clean by lunch, take Path B and don't look back. Also **lock the demo domain** on Day 1 (Mera accounts are bound to `rpId`/domain — changing it loses derivation).
+**Do Day 1:** create the Privy app (App ID), wire login (social + passkey), deploy the first smart account, and send one Pimlico-sponsored tx. Grab testnet MON from the faucet for all devs (sponsor funds, not users).
 
 > Rationale: judges reward a complete, working core loop over bounty checkbox sprawl. Bounties can be layered back later if the core lands early.
 
@@ -32,8 +25,8 @@ Research corrected our assumption: **Mera derives a regular EOA from the passkey
 ### Day 1 — Foundations (parallel)
 - **Contracts:** repo + Foundry setup; deploy mock-USDC + payment escrow skeleton to **Monad testnet**
 - **Backend:** Node/TS service skeleton, Alchemy testnet RPC, username registry v0 (SQLite is fine)
-- **Frontend:** Next.js PWA shell + **account spike (Path A vs B, 2h max)** — see decision block above
-- **Also Day 1:** **lock the demo domain** (Mera accounts are bound to `rpId`; changing domain breaks derivation), grab testnet MON from faucet for all devs
+- **Frontend:** Next.js PWA shell + **Privy login (social + passkey)** — see decision block above
+- **Also Day 1:** create Privy app + Pimlico paymaster, grab testnet MON from faucet for all devs
 - **End-of-day demo:** log in with a passkey, **send a sponsored tx** (never touch MON)
 
 ### Day 2 — Pay (core loop)
@@ -75,7 +68,6 @@ Research corrected our assumption: **Mera derives a regular EOA from the passkey
 
 ```
 contracts/
-├── MeraAccountFactory.sol   — deploys passkey smart accounts (ERC-4337 via Mera)
 ├── FluxPay.sol              — P2P settle to username-registered recipients
 ├── PaymentLinkEscrow.sol    — linkId → {deposit, expiry, claimer, status}
 ├── SplitSettlement.sol      — one tx → N transfers (atomic batch)
@@ -115,7 +107,7 @@ event StreamCancelled(uint256 indexed id, uint256 refunded, uint256 paidOut);
 
 | Route | Purpose |
 |---|---|
-| `/onboarding` | username + passkey (Mera) — target: <30s to first payment |
+| `/onboarding` | username + Privy login (social + passkey) — target: <30s to first payment |
 | `/` | home: balance, quick actions, live activity preview |
 | `/pay` | send by username/QR/link |
 | `/activity` | real-time feed |
@@ -129,7 +121,7 @@ event StreamCancelled(uint256 indexed id, uint256 refunded, uint256 paidOut);
 
 | Risk | Mitigation |
 |---|---|
-| Mera integration friction | Fallback: Privy or Dynamic embedded wallet (also a bounty) |
+| Privy/Pimlico outage or misconfig | Fallback: Dynamic embedded wallet (also a bounty); pre-fund a demo sponsor wallet |
 | Envio time sink | Not on critical path — log polling is the plan of record |
 | StreamVault security bug | Foundry fuzz tests on Day 4; reentrancy guard; pull-only withdraw |
 | Frontend polish eats feature time | Feature freeze end of Day 5, no exceptions |

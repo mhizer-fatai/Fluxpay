@@ -23,6 +23,9 @@ export const config = {
   // Contracts (filled from deployments/ once deployed)
   contracts: {
     usdc: process.env.USDC_ADDRESS,
+    weth: process.env.WETH_ADDRESS,
+    wmon: process.env.WMON_ADDRESS,
+    ausd: process.env.AUSD_ADDRESS,
     registry: process.env.USERNAME_REGISTRY_ADDRESS,
     fluxPay: process.env.FLUXPAY_ADDRESS,
     splitManager: process.env.SPLIT_MANAGER_ADDRESS,

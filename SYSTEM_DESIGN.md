@@ -65,58 +65,29 @@ P256 hardware-backed). The backend submits signed intents; it can delay but neve
 
 ## 3. Identity & Account Model
 
-> **CORRECTION — verified against Monad docs.** Mera is **not** an ERC-4337 smart-account
-> library. Mera derives a **regular EOA** from a passkey using the WebAuthn **PRF extension**:
-> the passkey returns 32 secret bytes, which are turned into a standard BIP-44 key
-> (`m/44'/60'/0'/0/i`). *"The accounts are regular EOAs. There is nothing to deploy, and no
-> bundler or MPC service to run."* This changes our account architecture — see 3.0.
+> **DECISION — Privy-only (locked).** A single auth + wallet stack: social logins
+> (Google, X, Apple, email) and passkey login converge on one embedded Kernel
+> smart account (EntryPoint v0.7) per user. Gas is sponsored by the Pimlico
+> paymaster; splits use native batched calls (`sendTransaction({ calls: [...] })`).
+> Mera was evaluated and dropped: passkey-only (no social logins), WebAuthn PRF
+> authenticator friction, no gas sponsorship. This forfeits the Mera bounties;
+> Privy ($5,000) stays in play. Dynamic is the fallback embedded-wallet provider.
 
-### 3.0 Two candidate account paths (pick on Day 1)
+### 3.0 Account architecture (Privy + Pimlico)
 
-| | **Path A — Mera (EOA from passkey)** | **Path B — Privy + Pimlico (4337 smart account)** |
-|---|---|---|
-| What the user gets | A normal EOA, derived from Face ID / Touch ID | A Kernel smart account (EntryPoint v0.7) |
-| Deployment | **None** — address exists immediately | Counterfactual, deployed on first op |
-| Gas sponsorship | **Not built in.** Needs EIP-7702 delegation, or we pay via a relayer/meta-tx pattern | **Built in** — Pimlico paymaster sponsors userOps |
-| Batching (splits!) | Not natively; needs 7702 delegation to a batching account | **Native** — `sendTransaction({ calls: [...] })` |
-| Recovery | Same passkey re-derives the same key; 24-word mnemonic is exportable (imports into MetaMask/Rabby) | Privy-managed auth + smart-account owners |
-| Bounty | **Mera bounties ($2,500 × 2)** | Privy ($5,000) / Dynamic ($5,000) |
-| Monad support | Official guide + React Native guide; open source | Official Monad template repo (`next-serwist-privy-smart-wallet`) |
-| Risk | PRF extension support varies by authenticator/browser | Third-party dependency, but documented and proven |
+| Concern | How |
+|---|---|
+| Login | Privy: social + passkey → one embedded wallet per user |
+| Account | Kernel smart account (EntryPoint v0.7), counterfactual until first op |
+| Gas sponsorship | **Built in** — Pimlico paymaster sponsors userOps; users hold ~0 MON |
+| Batching (splits!) | **Native** — `sendTransaction({ calls: [...] })` |
+| Recovery | Privy-managed auth + smart-account owners; ≥2 login methods per user |
+| Bounty | Privy ($5,000) / Dynamic ($5,000 fallback) |
+| Monad support | Official template repo (`next-serwist-privy-smart-wallet`) |
 
-**Known Mera constraints (from the docs — real, plan for them):**
-- Requires a passkey provider supporting the **WebAuthn PRF extension** (iCloud Keychain,
-  1Password, Google Password Manager). **On desktop Chrome, only passkeys saved to Google
-  Password Manager return PRF** — otherwise Mera throws `PRF_UNAVAILABLE`. Docs call this
-  *"the most common setup failure."* → **Test the judge's likely device/browser combo early;**
-  ship a graceful fallback path.
-- Requires HTTPS (or `localhost` in dev).
-- **A passkey is bound to its `rpId` (domain).** If we move domains (e.g. preview URL → final
-  demo URL) the accounts can no longer be derived. → **Lock the demo domain before onboarding
-  any test users**, and surface mnemonic export.
-- Key lives in page memory while a signing session is open (`session.end()` zeroes it). Choose
-  deliberately between *hold the session* (fewer prompts, key resident) and *prompt per
-  transaction* (safer, prompt each time). For Fluxpay: hold a short idle-timeout session so
-  sends/pauses feel instant; re-prompt for high-value actions.
-- Errors are typed (`MeraError.code`): `PRF_UNAVAILABLE`, `PASSKEY_OPERATION_FAILED`,
-  `CRYPTO_UNAVAILABLE`, `SESSION_ENDED` — branch on codes, not messages.
-- Same passkey can also derive Solana accounts (`createEd25519SigningSession`) — irrelevant now,
-  useful later for cross-chain.
-
-**Recommended architecture — hybrid, and it's cleaner than it sounds:**
-1. **Mera derives the user's key from the passkey** (great onboarding, targets the Mera bounties).
-2. **EIP-7702** delegates that EOA to a batching/session-key account contract, which gives us
-   batched splits and sponsored gas *without* a bundler. Monad supports 7702 (tx type `0x04`),
-   and delegation can be **submitted and paid for by a sponsor** — so the user still never needs MON.
-3. **Fallback:** if 7702 delegation proves fiddly in the sprint, ship Path B (Privy + Pimlico
-   from the official Monad template) and keep Mera for the login screen only.
-
-**Two Monad-specific 7702 gotchas (verified):**
-- A **delegated** EOA cannot have its balance *dip below 10 MON* (reserve-balance rule). Since our
-  users hold USDC and ~zero MON, this mostly doesn't bite — but **never** design a flow where a
-  delegated account must spend down its MON. Undelegate first if an account must be emptied.
-- Code executing in a delegated EOA's context **cannot call `CREATE`/`CREATE2`** — so our
-  delegated account contract must not deploy anything (e.g. no lazy-deploying escrow from within it).
+**Setup (Day 1):** create the Privy app (App ID), configure social + passkey login
+methods, create the Pimlico paymaster with sponsor funds, deploy the first smart
+account, and send one sponsored tx end-to-end.
 
 ### 3.1 Account primitives
 
@@ -124,7 +95,7 @@ P256 hardware-backed). The backend submits signed intents; it can delay but neve
   (v0.6 / v0.8 also deployed — see Appendix A). Official Monad template uses **Kernel + EP v0.7**.
 - **P256 precompile — VERIFIED AVAILABLE** at **`0x0100` per EIP-7951** (supersedes RIP-7212;
   identical address/interface). Enables cheap on-chain WebAuthn verification if we later want
-  passkey signatures validated *on-chain* rather than Mera's off-chain PRF derivation:
+   passkey signatures validated *on-chain*:
   ```solidity
   address constant P256_VERIFY = address(0x0100);
   function verifyP256(bytes32 h, uint256 r, uint256 s, uint256 qx, uint256 qy)
@@ -134,11 +105,9 @@ P256 hardware-backed). The backend submits signed intents; it can delay but neve
       return success && res.length == 32 && abi.decode(res, (uint256)) == 1;
   }
   ```
-  Note: Mera does *not* need this (it derives a secp256k1 key off-chain). It matters only for a
-  true on-chain-WebAuthn smart account — keep as a [prod] option.
+   Note: relevant only for a true on-chain-WebAuthn smart account — keep as a [prod] option.
 - **Contract size limit is 128 kb** on Monad (vs 24.5 kb) — fewer proxies, simpler contracts.
-- **Session keys**: prompting WebAuthn per transaction kills UX. With Mera, a signing session is
-  the equivalent primitive; with 7702/4337, use a scoped session-key module:
+- **Session keys**: prompting per transaction kills UX. Use a scoped session-key module:
   ```
   SessionPolicy { maxUsdPerTx, maxUsdPerDay, allowedSelectors[], expiresAt, revocable }
   ```
@@ -492,7 +461,7 @@ mainnet [prod]: IaC (Terraform) · k8s/Fly · managed pg/redis (multi-AZ) · blu
 
 | Area | [v1] hackathon | [prod] |
 |---|---|---|
-| Accounts | Mera passkey + session key | Pin validators, RIP-7212 path, recovery/guardians, spend-limit modules |
+| Accounts | Privy (social + passkey) + session key | Pin validators, RIP-7212 path, recovery/guardians, spend-limit modules |
 | Paymaster | Sponsored, policy-gated | USDC paymaster + fee oracle + reserve ops |
 | Streams | Prefunded per-stream escrow | Shared pool + liquidation |
 | Links | Recipient-bound signed claim | Expiry bounty, sanctions check |
@@ -575,10 +544,11 @@ store per-asset in config; the StreamVault X18 scaling (§4.1) makes the app dec
 
 ### Resolved during lookup (see §3.0)
 
-1. **Mera is an EOA-from-passkey lib, NOT 4337.** Derives a BIP-44 key from WebAuthn PRF
-   (32 secret bytes). No deployment, no bundler, no native gas sponsorship. Constraints:
+1. **Mera evaluated and dropped (Privy-only decision).** Mera is an EOA-from-passkey lib,
+   NOT 4337: derives a BIP-44 key from WebAuthn PRF, no deployment, no bundler, no native
+   gas sponsorship — and critically, **no social logins**. Constraints that sealed it:
    PRF-capable authenticator (desktop Chrome = Google Password Manager only), HTTPS required,
-   accounts bound to `rpId` (domain), session key lives in page memory. → §3.0 Path A/B.
+   accounts bound to `rpId` (domain). → §3.0.
 2. **Pimlico is confirmed on Monad testnet** and is Monad's documented sponsored-tx stack
    (Kernel + EntryPoint v0.7). Official template repo:
    `github.com/monad-developers/next-serwist-privy-smart-wallet` (PWA + Privy + Pimlico +
@@ -603,7 +573,6 @@ store per-asset in config; the StreamVault X18 scaling (§4.1) makes the app dec
 - Wallet Developer Integration Guide — `docs.monad.xyz/developer-essentials/wallet-developers`
 - Best Practices for High Performance Apps — `/developer-essentials/best-practices`
 - Reserve Balance semantics — `/developer-essentials/reserve-balance`
-- Mera passkey guides (incl. React Native) — `/guides/mera`
 - Next.js PWA + sponsored transactions templates — `/templates/next-serwist-privy-smart-wallet`
 - Envio HyperIndex guide on Monad — `/guides/indexers/tg-bot-using-envio`
 - MPP overview — `/reference/mpp/overview`
