@@ -12,9 +12,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@privy-io/node": "^0.35.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "ioredis": "^5.4.2",
+    "jose": "^6.2.12",
     "pg": "^8.13.1",
     "viem": "^2.21.55",
     "ws": "^8.18.0",
