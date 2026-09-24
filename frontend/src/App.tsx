@@ -4,6 +4,7 @@ import { RequireProfile } from '@/components/guard'
 import LandingPage from './pages/landing'
 import AuthPage from './pages/auth'
 import OnboardingPage from './pages/onboarding'
+import PayPage from './pages/pay'
 import DashboardPage from './pages/dashboard'
 import SendPage from './pages/send'
 import ReceivePage from './pages/receive'
@@ -27,6 +28,7 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/pay" element={<PayPage />} />
       <Route path="/dashboard" element={guarded(<DashboardPage />)} />
       <Route path="/send" element={guarded(<SendPage />)} />
       <Route path="/receive" element={guarded(<ReceivePage />)} />

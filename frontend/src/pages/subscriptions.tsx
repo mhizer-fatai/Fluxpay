@@ -1,190 +1,250 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { ArrowRight, CalendarDays, CreditCard, MoreHorizontal, Percent, Plus, TrendingUp, X } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { ArrowRight, CalendarDays, CreditCard, Plus, X } from 'lucide-react'
+import type { Address } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
+import { listStreams, type StreamRow } from '@/lib/streams'
+import { erc20Abi, monadTestnet, publicClient, STREAM_VAULT_ADDRESS, streamVaultAbi, TOKENS, type TokenKey } from '@/lib/chain'
+import { resolveUsernameApi } from '@/lib/api'
+import { money, shortAddr } from '@/lib/format'
 
-const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
-
-const metrics = [
-  { label: 'Active Subscriptions', value: '6', note: 'subscriptions', icon: CalendarDays },
-  { label: 'Monthly Spend', value: '$86.47', note: 'spending', icon: CreditCard },
-  { label: 'Invested This Month', value: '$2.14', note: 'this month', icon: TrendingUp },
-  { label: 'Average Investment Rate', value: '2.5%', note: 'average', icon: Percent },
-]
-
-type Sub = { id: string; name: string; amount: number; percent: number; next: string; nextLong: string; asset: string; status: 'active' | 'paused' }
-
-const subscriptions: Sub[] = [
-  { id: 'spotify', name: 'Spotify Premium', amount: 11.99, percent: 2, next: 'Sep 24', nextLong: 'September 24, 2026', asset: 'Spotify-related asset', status: 'active' },
-  { id: 'youtube', name: 'YouTube Premium', amount: 13.99, percent: 3, next: 'Sep 27', nextLong: 'September 27, 2026', asset: 'Alphabet', status: 'active' },
-  { id: 'netflix', name: 'Netflix', amount: 15.49, percent: 2, next: 'Oct 2', nextLong: 'October 2, 2026', asset: 'Netflix', status: 'active' },
-  { id: 'disney', name: 'Disney+', amount: 13.99, percent: 2, next: 'Oct 6', nextLong: 'October 6, 2026', asset: 'Disney', status: 'paused' },
-]
-
-const investmentHistory = [
-  { name: 'Spotify', payment: '$11.99', investment: '$0.24', date: 'Sep 18', status: 'Completed' },
-  { name: 'YouTube', payment: '$13.99', investment: '$0.42', date: 'Sep 17', status: 'Completed' },
-  { name: 'Netflix', payment: '$15.49', investment: '$0.31', date: 'Sep 16', status: 'Completed' },
-  { name: 'Spotify', payment: '$11.99', investment: '$0.24', date: 'Sep 10', status: 'Completed' },
-]
-
-const frequencies = ['Monthly', 'Weekly', 'Yearly', 'Custom']
-const assets = ['Spotify-related asset', 'Alphabet', 'Netflix', 'Meta', 'NVIDIA']
+const PAY_TOKENS: TokenKey[] = ['USDC', 'AUSD', 'WMON', 'WETH']
+const SECONDS_PER_MONTH = 2_592_000
 
 export default function SubscriptionsPage() {
+  const { address } = useProfile()
+  const { getWalletClient } = useWallet()
+  const [streams, setStreams] = useState<StreamRow[]>([])
+  const [loading, setLoading] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
-  const [detail, setDetail] = useState<Sub | null>(null)
-  const [form, setForm] = useState({ name: 'Spotify', amount: '11.99', freq: 'Monthly', percent: 2, asset: 'Spotify-related asset' })
-  const estimated = (parseFloat(form.amount) || 0) * form.percent / 100
+  const [detail, setDetail] = useState<StreamRow | null>(null)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({ recipient: '', amount: '', asset: 'USDC' as TokenKey, months: 1 })
+
+  const refresh = useCallback(async () => {
+    if (!address) return
+    setLoading(true)
+    try {
+      setStreams(await listStreams(address))
+    } catch {
+      setStreams([])
+    } finally {
+      setLoading(false)
+    }
+  }, [address])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const owned = streams.filter(s => s.role === 'owner' && !s.cancelled)
+  const incoming = streams.filter(s => s.role === 'recipient' && !s.cancelled)
+  const monthlySpend = owned.reduce((s, x) => s + x.monthly, 0)
+  const monthlyIncoming = incoming.reduce((s, x) => s + x.monthly, 0)
+  const funded = owned.reduce((s, x) => s + x.deposited, 0)
+
+  const resolveRecipient = async (input: string): Promise<string | null> => {
+    const v = input.trim()
+    if (/^0x[a-fA-F0-9]{40}$/.test(v)) return v
+    if (/^@[a-z0-9_]{3,32}$/.test(v) || /^[a-z0-9_]{3,32}$/.test(v)) {
+      try {
+        const r = await resolveUsernameApi(v.replace(/^@/, ''))
+        return r.address
+      } catch { return null }
+    }
+    return null
+  }
+
+  const createStream = async () => {
+    setError('')
+    if (!address) return
+    const amount = Number(form.amount)
+    if (!(amount > 0)) return setError('Enter a valid monthly amount')
+    setBusy('Resolving recipient…')
+    try {
+      const recipient = await resolveRecipient(form.recipient)
+      if (!recipient) return setError('Recipient must be a valid address or registered @username')
+      const token = TOKENS.find(t => t.key === form.asset)!
+      const walletClient = await getWalletClient()
+      if (!walletClient) throw new Error('wallet_unavailable')
+      const rawMonthly = BigInt(Math.round(amount * 10 ** token.decimals))
+      // ratePerSecondX18 = rawMonthly * 1e18 / secondsPerMonth
+      const rateX18 = (rawMonthly * 10n ** 18n) / BigInt(SECONDS_PER_MONTH)
+      const initialDeposit = rawMonthly * BigInt(Math.max(1, Math.floor(form.months)))
+      setBusy('Approving token…')
+      const approveHash = await walletClient.writeContract({
+        account: address as `0x${string}`, chain: monadTestnet,
+        address: token.address!, abi: erc20Abi, functionName: 'approve', args: [STREAM_VAULT_ADDRESS, initialDeposit],
+      })
+      await publicClient.waitForTransactionReceipt({ hash: approveHash })
+      setBusy('Creating stream…')
+      const hash = await walletClient.writeContract({
+        account: address as `0x${string}`, chain: monadTestnet,
+        address: STREAM_VAULT_ADDRESS, abi: streamVaultAbi, functionName: 'create',
+        args: [recipient as Address, token.address!, rateX18, initialDeposit],
+      })
+      const receipt = await publicClient.waitForTransactionReceipt({ hash })
+      if (receipt.status !== 'success') throw new Error('create_reverted')
+      setAddOpen(false)
+      setForm({ recipient: '', amount: '', asset: 'USDC', months: 1 })
+      void refresh()
+    } catch (e) {
+      const err = e as Error & { shortMessage?: string }
+      setError(err.shortMessage || err.message || 'Failed to create stream')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const streamAction = async (s: StreamRow, action: 'pause' | 'resume' | 'cancel' | 'withdraw') => {
+    setError('')
+    if (!address) return
+    setBusy(`${action}…`)
+    try {
+      const walletClient = await getWalletClient()
+      if (!walletClient) throw new Error('wallet_unavailable')
+      const hash = await walletClient.writeContract({
+        account: address as `0x${string}`, chain: monadTestnet,
+        address: STREAM_VAULT_ADDRESS, abi: streamVaultAbi, functionName: action, args: [s.id],
+      })
+      const receipt = await publicClient.waitForTransactionReceipt({ hash })
+      if (receipt.status !== 'success') throw new Error(`${action}_reverted`)
+      setDetail(null)
+      void refresh()
+    } catch (e) {
+      const err = e as Error & { shortMessage?: string }
+      setError(err.shortMessage || err.message || 'Action failed')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const StreamRowView = ({ s, onClick }: { s: StreamRow; onClick: () => void }) => (
+    <button className="su-item su-item-clickable" onClick={onClick} style={{ width: '100%', textAlign: 'left' }}>
+      <div className="su-item-top">
+        <span className="su-logo">{(s.token ?? 'S')[0]}</span>
+        <div className="su-item-name">
+          <strong>Stream #{s.id.toString()} · {s.role === 'owner' ? `→ ${shortAddr(s.recipient)}` : `← ${shortAddr(s.owner)}`}</strong>
+          <small>{s.monthly.toFixed(2)} {s.token ?? ''} / month · {s.role === 'owner' ? 'you pay' : 'you receive'}</small>
+        </div>
+        <span className={s.cancelled ? 'su-badge su-badge-paused' : s.paused ? 'su-badge su-badge-paused' : 'su-badge'}>
+          {s.cancelled ? 'Cancelled' : s.paused ? 'Paused' : 'Active'}
+        </span>
+      </div>
+      <div className="su-item-bottom">
+        <div className="su-stat"><small>Deposited</small><strong>{s.deposited.toFixed(2)} {s.token ?? ''}</strong></div>
+        {s.role === 'recipient' && <div className="su-stat"><small>Withdrawable</small><strong>{s.withdrawable.toFixed(4)} {s.token ?? ''}</strong></div>}
+        <div className="su-stat"><small>Started</small><strong>{new Date(s.createdAt * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong></div>
+      </div>
+    </button>
+  )
 
   return <DashboardShell>
     <section className="dashboard-content su">
       <div className="su-head">
         <div>
           <h1>Subscriptions</h1>
-          <p className="su-support">Connect your recurring payments, choose how much to invest from each one, and let FluxPay handle the rest.</p>
+          <p className="su-support">Real on-chain payment streams from StreamVault — fund a monthly rate, pause, resume, or cancel anytime.</p>
         </div>
-        <button className="ov-btn primary" onClick={() => setAddOpen(true)}><Plus size={15} /> Add Subscription</button>
+        <button className="ov-btn primary" onClick={() => setAddOpen(true)}><Plus size={15} /> New Stream</button>
       </div>
 
       <div className="su-metrics">
-        {metrics.map(m => {
-          const Icon = m.icon
-          return (
-            <div className="ov-stat" key={m.label}>
-              <span className="ov-stat-icon"><Icon size={16} /></span>
-              <small>{m.label}</small>
-              <strong>{m.value}</strong>
-              <em>{m.note}</em>
-            </div>
-          )
-        })}
+        <div className="ov-stat"><span className="ov-stat-icon"><CalendarDays size={16} /></span><small>Active Streams</small><strong>{owned.length + incoming.length}</strong><em>on StreamVault</em></div>
+        <div className="ov-stat"><span className="ov-stat-icon"><CreditCard size={16} /></span><small>Monthly Outgoing</small><strong>{money(monthlySpend)}</strong><em>across {owned.length} streams</em></div>
+        <div className="ov-stat"><small>Monthly Incoming</small><strong>{money(monthlyIncoming)}</strong><em>across {incoming.length} streams</em></div>
+        <div className="ov-stat"><small>Total Funded</small><strong>{money(funded)}</strong><em>deposited by you</em></div>
       </div>
+
+      {(busy || error) && <p style={{ fontSize: 13, margin: '8px 0' }}>{busy}{error && <span style={{ color: '#ef4444' }}> {error}</span>}</p>}
 
       <div className="su-card">
         <div className="su-section-head">
           <div>
-            <h2>Your Subscriptions</h2>
-            <p>Manage your active subscriptions and investment preferences.</p>
+            <h2>Your Streams</h2>
+            <p>Outgoing and incoming payment streams, read live from Monad.</p>
           </div>
+          <button className="wa-btn" onClick={() => void refresh()} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
         </div>
         <div className="su-list">
-          {subscriptions.map(s => {
-            const per = s.amount * s.percent / 100
-            return (
-              <div className="su-item" key={s.id}>
-                <div className="su-item-top">
-                  <span className="su-logo">{s.name[0]}</span>
-                  <div className="su-item-name"><strong>{s.name}</strong><small>{money(s.amount)} / month</small></div>
-                  <span className={s.status === 'active' ? 'su-badge' : 'su-badge su-badge-paused'}>{s.status === 'active' ? 'Active' : 'Paused'}</span>
-                </div>
-                <div className="su-item-bottom">
-                  <div className="su-stat"><small>Investment</small><strong>{s.percent}%</strong></div>
-                  <div className="su-stat"><small>Next payment</small><strong>{s.next}</strong></div>
-                  <div className="su-stat"><small>Estimated investment</small><strong>{money(per)}</strong></div>
-                  <div className="su-item-actions">
-                    <button className="su-action" onClick={() => setDetail(s)}>Edit</button>
-                    <button className="su-action">{s.status === 'active' ? 'Pause' : 'Resume'}</button>
-                    <button className="su-action su-more" aria-label="More options"><MoreHorizontal size={14} /></button>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="su-card">
-        <div className="su-section-head">
-          <h2>Subscription Investment History</h2>
-          <Link className="ov-link" to="/activity">View All Activity <ArrowRight size={14} /></Link>
-        </div>
-        <div className="su-table">
-          <div className="su-tr su-th"><span>Subscription</span><span>Payment</span><span>Investment</span><span>Date</span><span>Status</span></div>
-          {investmentHistory.map((h, i) => (
-            <div className="su-tr" key={i}>
-              <span className="su-strong">{h.name}</span>
-              <span>{h.payment}</span>
-              <span className="su-invest">{h.investment}</span>
-              <span>{h.date}</span>
-              <span className="su-status">{h.status}</span>
-            </div>
-          ))}
+          {loading && streams.length === 0 && <p style={{ color: 'var(--muted, #999)', fontSize: 13 }}>Reading StreamVault…</p>}
+          {!loading && streams.length === 0 && <p style={{ color: 'var(--muted, #999)', fontSize: 13 }}>No streams yet — create one to start a recurring on-chain payment.</p>}
+          {streams.map(s => <StreamRowView key={s.id.toString()} s={s} onClick={() => setDetail(s)} />)}
         </div>
       </div>
     </section>
 
     {addOpen && (
-      <div className="su-modal-backdrop" onClick={() => setAddOpen(false)}>
+      <div className="su-modal-backdrop" onClick={() => !busy && setAddOpen(false)}>
         <div className="su-modal" onClick={e => e.stopPropagation()}>
           <div className="su-modal-head">
-            <h2>Add a Subscription</h2>
+            <h2>New Payment Stream</h2>
             <button className="su-close" onClick={() => setAddOpen(false)} aria-label="Close"><X size={16} /></button>
           </div>
           <div className="su-field">
-            <label>Subscription name</label>
-            <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            <label>Pay to (address or @username)</label>
+            <input type="text" value={form.recipient} onChange={e => setForm({ ...form, recipient: e.target.value })} placeholder="0x… or @alice" />
           </div>
           <div className="su-field">
             <label>Monthly amount</label>
-            <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} />
+            <input type="number" min={0} step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} />
           </div>
           <div className="su-field">
-            <label>Billing frequency</label>
-            <div className="su-seg">
-              {frequencies.map(f => <button key={f} className={f === form.freq ? 'on' : ''} onClick={() => setForm({ ...form, freq: f })}>{f}</button>)}
-            </div>
-          </div>
-          <div className="su-field">
-            <label>Investment percentage</label>
-            <div className="su-range-row">
-              <input className="su-range" type="range" min={0} max={10} step={1} value={form.percent} onChange={e => setForm({ ...form, percent: Number(e.target.value) })} />
-              <strong>{form.percent}%</strong>
-            </div>
-            <div className="su-range-scale"><span>0%</span><span>10%</span></div>
-          </div>
-          <div className="su-estimate"><span>Estimated investment</span><strong>{money(estimated)} per payment</strong></div>
-          <div className="su-field">
-            <label>Investment asset</label>
-            <select value={form.asset} onChange={e => setForm({ ...form, asset: e.target.value })}>
-              {assets.map(a => <option key={a}>{a}</option>)}
+            <label>Asset</label>
+            <select value={form.asset} onChange={e => setForm({ ...form, asset: e.target.value as TokenKey })}>
+              {PAY_TOKENS.map(k => <option key={k}>{k}</option>)}
             </select>
           </div>
+          <div className="su-field">
+            <label>Pre-fund (months)</label>
+            <input type="number" min={1} step={1} value={form.months} onChange={e => setForm({ ...form, months: Number(e.target.value) })} />
+          </div>
+          <div className="su-estimate">
+            <span>Upfront cost (amount × months + gas)</span>
+            <strong>{((parseFloat(form.amount) || 0) * Math.max(1, Math.floor(form.months))).toFixed(2)} {form.asset}</strong>
+          </div>
+          {error && <p style={{ color: '#ef4444', fontSize: 12 }}>{error}</p>}
           <div className="su-modal-actions">
-            <button className="ov-btn" onClick={() => setAddOpen(false)}>Cancel</button>
-            <button className="ov-btn primary" onClick={() => setAddOpen(false)}>Add Subscription</button>
+            <button className="ov-btn" onClick={() => setAddOpen(false)} disabled={!!busy}>Cancel</button>
+            <button className="ov-btn primary" onClick={createStream} disabled={!!busy || !form.recipient || !form.amount}>{busy ? 'Working…' : 'Approve & Create'}</button>
           </div>
         </div>
       </div>
     )}
 
     {detail && (
-      <div className="su-modal-backdrop" onClick={() => setDetail(null)}>
+      <div className="su-modal-backdrop" onClick={() => !busy && setDetail(null)}>
         <div className="su-modal" onClick={e => e.stopPropagation()}>
           <div className="su-modal-head">
-            <h2>{detail.name}</h2>
+            <h2>Stream #{detail.id.toString()}</h2>
             <button className="su-close" onClick={() => setDetail(null)} aria-label="Close"><X size={16} /></button>
           </div>
           <div className="su-detail-head">
-            <span className={detail.status === 'active' ? 'su-badge' : 'su-badge su-badge-paused'}>{detail.status === 'active' ? 'Active' : 'Paused'}</span>
-            <span className="su-detail-amount">{money(detail.amount)} / month</span>
+            <span className={detail.cancelled || detail.paused ? 'su-badge su-badge-paused' : 'su-badge'}>
+              {detail.cancelled ? 'Cancelled' : detail.paused ? 'Paused' : 'Active'}
+            </span>
+            <span className="su-detail-amount">{detail.monthly.toFixed(2)} {detail.token ?? ''} / month</span>
           </div>
-          <h3 className="su-subhead">Investment Settings</h3>
           <div className="su-detail-grid">
-            <div className="su-stat"><small>Investment percentage</small><strong>{detail.percent}%</strong></div>
-            <div className="su-stat"><small>Amount per payment</small><strong>{money(detail.amount * detail.percent / 100)}</strong></div>
-            <div className="su-stat"><small>Investment asset</small><strong>{detail.asset}</strong></div>
-            <div className="su-stat"><small>Next payment</small><strong>{detail.nextLong}</strong></div>
-            <div className="su-stat"><small>Estimated monthly investment</small><strong>{money(detail.amount * detail.percent / 100)}</strong></div>
+            <div className="su-stat"><small>Role</small><strong>{detail.role === 'owner' ? 'You pay' : 'You receive'}</strong></div>
+            <div className="su-stat"><small>{detail.role === 'owner' ? 'Recipient' : 'Payer'}</small><strong>{shortAddr(detail.role === 'owner' ? detail.recipient : detail.owner)}</strong></div>
+            <div className="su-stat"><small>Deposited</small><strong>{detail.deposited.toFixed(2)} {detail.token ?? ''}</strong></div>
+            {detail.role === 'recipient' && <div className="su-stat"><small>Withdrawable now</small><strong>{detail.withdrawable.toFixed(6)} {detail.token ?? ''}</strong></div>}
           </div>
+          {error && <p style={{ color: '#ef4444', fontSize: 12 }}>{error}</p>}
           <div className="su-modal-actions">
-            <button className="ov-btn primary" onClick={() => setDetail(null)}>Save Changes</button>
+            {detail.role === 'owner' && !detail.cancelled && (detail.paused
+              ? <button className="ov-btn primary" onClick={() => streamAction(detail, 'resume')} disabled={!!busy}>Resume</button>
+              : <button className="ov-btn" onClick={() => streamAction(detail, 'pause')} disabled={!!busy}>Pause</button>)}
+            {detail.role === 'recipient' && !detail.cancelled && detail.withdrawable > 0 && (
+              <button className="ov-btn primary" onClick={() => streamAction(detail, 'withdraw')} disabled={!!busy}>Withdraw</button>
+            )}
+            {!detail.cancelled && (
+              <button className="ov-btn su-danger" onClick={() => streamAction(detail, 'cancel')} disabled={!!busy}>Cancel stream</button>
+            )}
           </div>
-          <div className="su-modal-actions su-modal-actions-left">
-            <button className="ov-btn">Pause Subscription</button>
-            <button className="ov-btn su-danger">Delete Subscription</button>
-          </div>
-          <p className="su-note">Pausing or deleting a subscription stops future investment activity. Your existing investments and ownership are not affected.</p>
         </div>
       </div>
     )}

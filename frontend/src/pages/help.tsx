@@ -1,7 +1,16 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, ChevronDown, Paperclip, Search, X } from 'lucide-react'
+import { ArrowRight, ChevronDown, ExternalLink, Paperclip, Search, X } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { publicClient, explorerTx } from '@/lib/chain'
+
+interface TxStatus {
+  hash: string
+  status: 'success' | 'reverted' | 'not_found'
+  block?: bigint
+  timestamp?: number
+  gasUsed?: string
+}
 
 const quickHelp = [
   { title: 'Getting Started', desc: 'Learn how FluxPay works and set up your account.', cta: 'View Guide' },
@@ -30,6 +39,36 @@ export default function HelpPage() {
   const [openFaq, setOpenFaq] = useState<number | null>(0)
   const [reportOpen, setReportOpen] = useState(false)
   const [txOpen, setTxOpen] = useState(false)
+  const [txHashInput, setTxHashInput] = useState('')
+  const [txStatus, setTxStatus] = useState<TxStatus | null>(null)
+  const [txChecking, setTxChecking] = useState(false)
+  const [txError, setTxError] = useState('')
+
+  const checkTx = async () => {
+    setTxError('')
+    setTxStatus(null)
+    const hash = txHashInput.trim()
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+      setTxError('Enter a full 64-hex transaction hash (0x…)')
+      return
+    }
+    setTxChecking(true)
+    try {
+      const receipt = await publicClient.getTransactionReceipt({ hash: hash as `0x${string}` })
+      const block = await publicClient.getBlock({ blockNumber: receipt.blockNumber })
+      setTxStatus({
+        hash,
+        status: receipt.status === 'success' ? 'success' : 'reverted',
+        block: receipt.blockNumber,
+        timestamp: Number(block.timestamp),
+        gasUsed: receipt.gasUsed.toString(),
+      })
+    } catch {
+      setTxStatus({ hash, status: 'not_found' })
+    } finally {
+      setTxChecking(false)
+    }
+  }
 
   const q = search.trim().toLowerCase()
   const filteredQuick = q ? quickHelp.filter(c => `${c.title} ${c.desc}`.toLowerCase().includes(q)) : quickHelp
@@ -153,17 +192,22 @@ export default function HelpPage() {
           <div className="hp-modal-head"><h2>Transaction Status</h2><button className="hp-close" onClick={() => setTxOpen(false)} aria-label="Close"><X size={16} /></button></div>
           <div className="hp-field">
             <label>Transaction ID</label>
-            <div className="hp-input-row"><input defaultValue="0x8f2...a91" /><button className="ov-btn primary">Check</button></div>
+            <div className="hp-input-row">
+              <input placeholder="0x…" value={txHashInput} onChange={e => setTxHashInput(e.target.value)} spellCheck={false} />
+              <button className="ov-btn primary" onClick={checkTx} disabled={txChecking}>{txChecking ? 'Checking…' : 'Check'}</button>
+            </div>
           </div>
-          <div className="hp-tx">
-            <div className="hp-tx-row"><span>Type</span><strong>Investment</strong></div>
-            <div className="hp-tx-row"><span>Amount</span><strong>+$0.24 USDC</strong></div>
-            <div className="hp-tx-row"><span>Status</span><strong className="up">Completed</strong></div>
-            <div className="hp-tx-row"><span>Network</span><strong>Monad</strong></div>
-            <div className="hp-tx-row"><span>Transaction ID</span><strong>0x8f2...a91</strong></div>
-            <div className="hp-tx-row"><span>Timestamp</span><strong>Sep 18, 2026 · 10:42 AM</strong></div>
-            <div className="hp-tx-row"><span>Explorer</span><button className="hp-link">View on Explorer <ArrowRight size={13} /></button></div>
-          </div>
+          {txError && <p style={{ color: '#ef4444', fontSize: 13 }}>{txError}</p>}
+          {txStatus && (
+            <div className="hp-tx">
+              <div className="hp-tx-row"><span>Status</span><strong className={txStatus.status === 'success' ? 'up' : ''}>{txStatus.status === 'success' ? 'Confirmed' : txStatus.status === 'reverted' ? 'Reverted' : 'Not found on Monad testnet'}</strong></div>
+              {txStatus.block && <div className="hp-tx-row"><span>Block</span><strong>{txStatus.block.toString()}</strong></div>}
+              {txStatus.timestamp && <div className="hp-tx-row"><span>Timestamp</span><strong>{new Date(txStatus.timestamp * 1000).toLocaleString('en-US')}</strong></div>}
+              {txStatus.gasUsed && <div className="hp-tx-row"><span>Gas used</span><strong>{txStatus.gasUsed}</strong></div>}
+              <div className="hp-tx-row"><span>Transaction ID</span><strong style={{ wordBreak: 'break-all' }}>{txStatus.hash}</strong></div>
+              <div className="hp-tx-row"><span>Explorer</span><a className="hp-link" href={explorerTx(txStatus.hash)} target="_blank" rel="noreferrer">View on Explorer <ExternalLink size={13} /></a></div>
+            </div>
+          )}
         </div>
       </div>
     )}

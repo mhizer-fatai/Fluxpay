@@ -1,28 +1,21 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Check, Clipboard, QrCode } from 'lucide-react'
+import { ArrowRight, Check, Clipboard, ExternalLink, QrCode } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { Dropdown } from '@/components/dropdown'
+import { useProfile } from '@/hooks/profile'
+import { useBalances } from '@/hooks/useBalances'
+import { useWallet } from '@/hooks/useWallet'
+import { sendFunds, estimateFeeMon } from '@/lib/transfers'
+import { fetchActivity } from '@/lib/activity'
+import { getUsdPrices, TOKENS, type TokenKey } from '@/lib/chain'
+import { resolveUsernameApi } from '@/lib/api'
+import { money, shortAddr } from '@/lib/format'
+import { EXPLORER_URL } from '@/lib/chain'
 
-const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
-const short = (a: string) => a.length > 14 ? `${a.slice(0, 6)}...${a.slice(-4)}` : a
+type Step = 'form' | 'confirm' | 'sending' | 'success'
 
-const ADDRESS = '0x7A3F...92B1'
-const FEE = 0.02
-
-const assets = [
-  { symbol: 'USDC', name: 'USD Coin', balance: 1435.30, price: 1 },
-  { symbol: 'MON', name: 'Monad', balance: 18.42, price: 2.32 },
-]
-
-const recents = [
-  { addr: '0x83F4...A21F', last: '$100 USDC' },
-  { addr: '0x71A2...4B92', last: '$50 USDC' },
-]
-
-type Step = 'form' | 'confirm' | 'success'
-
-const networks = ['Monad Mainnet', 'Monad Testnet']
+const SENDABLE: TokenKey[] = ['USDC', 'AUSD', 'WMON', 'WETH', 'MON']
 
 function SlideToSend({ onComplete, disabled }: { onComplete: () => void; disabled?: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
@@ -56,7 +49,7 @@ function SlideToSend({ onComplete, disabled }: { onComplete: () => void; disable
 
   return (
     <div className={`sn-slide ${disabled ? 'is-disabled' : ''}`} ref={trackRef} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
-      <span className="sn-slide-label">{done ? 'Sending…' : 'Slide to send'}</span>
+      <span className="sn-slide-label">{done ? 'Preparing…' : 'Slide to send'}</span>
       <button className="sn-slide-handle" style={{ transform: `translateX(${x}px)` }} onPointerDown={onDown} aria-label="Slide to send" disabled={disabled}>
         <ArrowRight size={16} />
       </button>
@@ -65,22 +58,116 @@ function SlideToSend({ onComplete, disabled }: { onComplete: () => void; disable
 }
 
 export default function SendPage() {
+  const { address } = useProfile()
+  const { getWalletClient } = useWallet()
+  const { rows } = useBalances(address)
+
   const [step, setStep] = useState<Step>('form')
-  const [assetSym, setAssetSym] = useState('USDC')
-  const [network, setNetwork] = useState('Monad Mainnet')
+  const [assetSym, setAssetSym] = useState<TokenKey>('USDC')
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('')
+  const [feeMon, setFeeMon] = useState<number | null>(null)
+  const [prices, setPrices] = useState<Record<string, number> | null>(null)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [txHash, setTxHash] = useState<string | null>(null)
+  const [resolvedTo, setResolvedTo] = useState<string | null>(null)
+  const [recents, setRecents] = useState<Array<{ addr: string; last: string }>>([])
 
-  const asset = assets.find(a => a.symbol === assetSym) ?? assets[0]
+  const asset = TOKENS.find(t => t.key === assetSym)!
+  const balanceRow = rows.find(r => r.key === assetSym)
+  const balance = balanceRow?.amount ?? 0
   const amt = parseFloat(amount) || 0
-  const usd = amt * asset.price
-  const total = amt + FEE
-  const canContinue = recipient.trim().length > 0 && amt > 0 && amt <= asset.balance
+  const usd = prices ? amt * (prices[assetSym] ?? 0) : 0
+  const canContinue = recipient.trim().length > 3 && amt > 0 && amt <= balance
+
+  useEffect(() => { void getUsdPrices().then(setPrices) }, [])
+  useEffect(() => {
+    if (!address) return
+    fetchActivity(address, 50_000)
+      .then(items => {
+        const seen = new Set<string>()
+        const out: Array<{ addr: string; last: string }> = []
+        for (const i of items) {
+          const c = i.counterparty.toLowerCase()
+          if (seen.has(c)) continue
+          seen.add(c)
+          out.push({ addr: c, last: `${i.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${i.token ?? ''}` })
+          if (out.length >= 3) break
+        }
+        setRecents(out)
+      })
+      .catch(() => setRecents([]))
+  }, [address])
+
+  useEffect(() => {
+    if (!address || !canContinue) { setFeeMon(null); return }
+    let alive = true
+    const to = /^0x[a-fA-F0-9]{40}$/.test(recipient.trim()) ? (recipient.trim() as `0x${string}`) : null
+    if (!to) { setFeeMon(null); return }
+    void estimateFeeMon({ from: address as `0x${string}`, token: asset, amountHuman: amt, to })
+      .then(f => { if (alive) setFeeMon(f) })
+      .catch(() => { if (alive) setFeeMon(null) })
+    return () => { alive = false }
+  }, [address, recipient, amt, asset, canContinue])
 
   const paste = async () => {
-    try { const text = await navigator.clipboard.readText(); if (text) setRecipient(text) } catch { /* ignore */ }
+    try { const text = await navigator.clipboard.readText(); if (text) setRecipient(text.trim()) } catch { /* ignore */ }
   }
-  const reset = () => { setStep('form'); setRecipient(''); setAmount('') }
+  const reset = () => { setStep('form'); setRecipient(''); setAmount(''); setTxHash(null); setResolvedTo(null); setError('') }
+
+  const resolveRecipient = async (): Promise<string | null> => {
+    const v = recipient.trim()
+    if (/^0x[a-fA-F0-9]{40}$/.test(v)) return v
+    try {
+      const r = await resolveUsernameApi(v.replace(/^@/, ''))
+      return r.address
+    } catch {
+      return null
+    }
+  }
+
+  const confirmSend = async () => {
+    setError('')
+    if (!address) return setError('Wallet not ready')
+    setBusy('Resolving recipient…')
+    try {
+      const to = await resolveRecipient()
+      if (!to) return setError('Recipient must be a valid 0x address or a registered @username')
+      setResolvedTo(to)
+      const walletClient = await getWalletClient()
+      if (!walletClient) throw new Error('wallet_unavailable')
+      const result = await sendFunds({
+        walletClient,
+        from: address as `0x${string}`,
+        token: asset,
+        amountHuman: amt,
+        to: to as `0x${string}`,
+        onStep: s => setBusy(s === 'approving' ? 'Approving token spend…' : 'Sending…'),
+      })
+      setTxHash(result.txHash)
+      setBusy('')
+      setStep('success')
+    } catch (e) {
+      const err = e as Error & { shortMessage?: string }
+      const msg = err.shortMessage || err.message || 'Send failed'
+      setError(/insufficient funds/i.test(msg) ? 'Not enough gas — get testnet MON from faucet.monad.xyz.' : msg)
+      setBusy('')
+      setStep('confirm')
+    }
+  }
+
+  const total = feeMon != null ? amt + feeMon : amt
+
+  const summary = useMemo(() => (
+    <>
+      <div className="sn-sum-row"><span>You&apos;re sending</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
+      <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
+      <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
+      <div className="sn-sum-row"><span>Network fee</span><strong>{feeMon != null ? `~${feeMon.toFixed(5)} MON` : 'estimating…'}</strong></div>
+      <div className="sn-sum-row sn-sum-total"><span>Total</span><strong>{total.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol === 'MON' ? 'MON' : `${asset.symbol} + gas`}</strong></div>
+    </>
+  ), [amt, asset.symbol, resolvedTo, recipient, feeMon, total])
 
   return <DashboardShell>
     <section className="dashboard-content sn">
@@ -95,31 +182,27 @@ export default function SendPage() {
             <div className="sn-field">
               <label>From</label>
               <div className="sn-static sn-wallet-static">
-                <div><strong>FluxPay Wallet</strong><small>{ADDRESS}</small></div>
-                <span className="sn-wallet-bal">{money(asset.balance)} {asset.symbol}</span>
+                <div><strong>FluxPay Wallet</strong><small>{address ?? 'connecting…'}</small></div>
+                <span className="sn-wallet-bal">{balance.toLocaleString('en-US', { maximumFractionDigits: 4 })} {asset.symbol}</span>
               </div>
             </div>
             <div className="sn-field">
               <label>Asset</label>
-              <Dropdown value={assetSym} options={assets.map(a => ({ value: a.symbol, label: `${a.symbol} — ${a.name}` }))} onChange={setAssetSym} />
-              <p className="sn-hint">{asset.balance.toLocaleString()} {asset.symbol} available</p>
+              <Dropdown value={assetSym} options={SENDABLE.map(k => ({ value: k, label: `${k} — ${TOKENS.find(t => t.key === k)!.name}` }))} onChange={v => setAssetSym(v as TokenKey)} />
+              <p className="sn-hint">{balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol} available</p>
             </div>
           </div>
 
           <div className="sn-panel">
             <h3>Receive</h3>
             <div className="sn-field">
-              <label>Recipient wallet address</label>
-              <input placeholder="Enter 0x address" value={recipient} onChange={e => setRecipient(e.target.value)} />
+              <label>Recipient address or @username</label>
+              <input placeholder="0x… or @name" value={recipient} onChange={e => setRecipient(e.target.value)} spellCheck={false} />
               <div className="sn-input-row sn-input-row-btns">
                 <button className="sn-inline" onClick={paste}><Clipboard size={13} /> Paste</button>
-                <button className="sn-inline"><QrCode size={13} /> Scan QR</button>
+                <Link className="sn-inline" to="/receive"><QrCode size={13} /> My QR</Link>
               </div>
-              <p className="sn-hint">Make sure the recipient address supports the selected network and asset.</p>
-            </div>
-            <div className="sn-field">
-              <label>Network</label>
-              <Dropdown value={network} options={networks.map(n => ({ value: n, label: n }))} onChange={setNetwork} />
+              <p className="sn-hint">@usernames resolve through the on-chain FluxPay registry.</p>
             </div>
           </div>
 
@@ -129,13 +212,13 @@ export default function SendPage() {
               <label>Amount</label>
               <div className="sn-input-row">
                 <input placeholder={`0.00 ${asset.symbol}`} value={amount} inputMode="decimal" onChange={e => setAmount(e.target.value)} />
-                <button className="sn-inline" onClick={() => setAmount(String(asset.balance))}>Max</button>
+                <button className="sn-inline" onClick={() => setAmount(String(balance))}>Max</button>
               </div>
-              <p className="sn-hint">Available: {asset.balance.toLocaleString()} {asset.symbol} · ≈ {money(usd)}</p>
+              <p className="sn-hint">Available: {balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}{usd > 0 && <> · ≈ {money(usd)}</>}</p>
             </div>
-            <div className="sn-fee-row"><span>Gas fee</span><strong>~{money(FEE)}</strong></div>
-            <SlideToSend disabled={!canContinue} onComplete={() => setStep('confirm')} />
-            {!canContinue && <p className="sn-hint sn-hint-center">Enter a recipient and a valid amount to continue.</p>}
+            <div className="sn-fee-row"><span>Gas fee</span><strong>{feeMon != null ? `~${feeMon.toFixed(5)} MON` : 'estimating…'}</strong></div>
+            <SlideToSend disabled={!canContinue || !!busy} onComplete={() => setStep('confirm')} />
+            {!canContinue && <p className="sn-hint sn-hint-center">Enter a recipient and a valid amount (≤ balance) to continue.</p>}
           </div>
         </div>
       ) : (
@@ -143,18 +226,20 @@ export default function SendPage() {
           {step === 'confirm' && (
             <div className="sn-step">
               <h2>Confirm Transfer</h2>
-              <div className="sn-summary">
-                <div className="sn-sum-row"><span>You&apos;re sending</span><strong>{amt.toFixed(2)} {asset.symbol}</strong></div>
-                <div className="sn-sum-row"><span>To</span><strong>{short(recipient)}</strong></div>
-                <div className="sn-sum-row"><span>Network</span><strong>{network}</strong></div>
-                <div className="sn-sum-row"><span>Network fee</span><strong>~{money(FEE)}</strong></div>
-                <div className="sn-sum-row sn-sum-total"><span>Total</span><strong>{total.toFixed(2)} {asset.symbol}</strong></div>
-              </div>
-              <p className="sn-warning">Transactions on the blockchain cannot be reversed once confirmed. Please verify the recipient address before continuing.</p>
+              <div className="sn-summary">{summary}</div>
+              <p className="sn-warning">Transactions on the blockchain cannot be reversed once confirmed. Please verify the recipient before continuing.</p>
+              {error && <p style={{ color: '#ef4444', fontSize: 13 }}>{error}</p>}
               <div className="sn-actions">
-                <button className="ov-btn" onClick={() => setStep('form')}>Back</button>
-                <button className="ov-btn primary" onClick={() => setStep('success')}>Confirm &amp; Send</button>
+                <button className="ov-btn" onClick={() => setStep('form')} disabled={!!busy}>Back</button>
+                <button className="ov-btn primary" onClick={confirmSend} disabled={!!busy}>{busy || 'Confirm & Send'}</button>
               </div>
+            </div>
+          )}
+
+          {step === 'sending' && (
+            <div className="sn-step">
+              <h2>Sending…</h2>
+              <p className="sn-hint">{busy || 'Waiting for confirmation on Monad…'}</p>
             </div>
           )}
 
@@ -162,15 +247,15 @@ export default function SendPage() {
             <div className="sn-step sn-success">
               <span className="sn-success-icon"><Check size={22} /></span>
               <h2>Transfer Sent</h2>
-              <p className="sn-success-amount">{amt.toFixed(2)} {asset.symbol}</p>
-              <p className="sn-success-sub">sent successfully.</p>
+              <p className="sn-success-amount">{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</p>
+              <p className="sn-success-sub">confirmed on Monad testnet.</p>
               <div className="sn-summary">
-                <div className="sn-sum-row"><span>To</span><strong>{short(recipient)}</strong></div>
-                <div className="sn-sum-row"><span>Transaction ID</span><strong>0x8f2...a91</strong></div>
-                <div className="sn-sum-row"><span>Network</span><strong>{network}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
+                <div className="sn-sum-row"><span>Transaction ID</span><strong style={{ wordBreak: 'break-all' }}>{txHash ? shortAddr(txHash) : '—'}</strong></div>
+                <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
               </div>
               <div className="sn-actions">
-                <button className="ov-btn">View Transaction</button>
+                {txHash && <a className="ov-btn" href={`${EXPLORER_URL}/tx/${txHash}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> View Transaction</a>}
                 <button className="ov-btn" onClick={reset}>Send Again</button>
                 <Link className="ov-btn primary" to="/wallet">Back to Wallet</Link>
               </div>
@@ -179,15 +264,17 @@ export default function SendPage() {
         </div>
       )}
 
-      <div className="sn-recents">
-        <div className="sn-recents-head"><h2>Recent Recipients</h2></div>
-        {recents.map(r => (
-          <button className="sn-recent" key={r.addr} onClick={() => { setRecipient(r.addr); setStep('form') }}>
-            <span className="sn-recent-addr">{r.addr}</span>
-            <span className="sn-recent-last">Last sent: {r.last}</span>
-          </button>
-        ))}
-      </div>
+      {recents.length > 0 && (
+        <div className="sn-recents">
+          <div className="sn-recents-head"><h2>Recent Recipients</h2></div>
+          {recents.map(r => (
+            <button className="sn-recent" key={r.addr} onClick={() => { setRecipient(r.addr); setStep('form') }}>
+              <span className="sn-recent-addr">{shortAddr(r.addr)}</span>
+              <span className="sn-recent-last">Last: {r.last}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </section>
   </DashboardShell>
 }

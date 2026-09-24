@@ -9,9 +9,11 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
+    "@kuru-labs/kuru-sdk": "^0.0.95",
     "@privy-io/react-auth": "^3.45.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "ethers": "^5.7.2",
     "lucide-react": "^1.16.0",
     "qrcode": "^1.5.4",
     "react": "^19",
