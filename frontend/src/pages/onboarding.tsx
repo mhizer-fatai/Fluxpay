@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useWallet } from '@/hooks/useWallet'
 import { useProfile } from '@/hooks/profile'
 import { checkUsername } from '@/lib/api'
-import { FLUXPAY_ADDRESS, REGISTRY_ADDRESS, USERNAME_HASH, EXPLORER_URL, monadTestnet, publicClient, registryAbi } from '@/lib/chain'
+import { REGISTRY_ADDRESS, USERNAME_HASH, EXPLORER_URL, monadTestnet, publicClient, registryAbi } from '@/lib/chain'
 import type { Hash } from 'viem'
 
 const USERNAME_RE = /^[a-z0-9_]{3,32}$/
@@ -145,7 +145,7 @@ export default function OnboardingPage() {
             </p>
           )}
           <p style={{ fontSize: 11, marginTop: 14, color: 'var(--muted, #999)' }}>
-            Contract: {REGISTRY_ADDRESS} · Paymaster: {FLUXPAY_ADDRESS.slice(0, 10)}…
+            Username is registered on-chain (Monad testnet) and owned by your wallet.
           </p>
         </div>
       </div>

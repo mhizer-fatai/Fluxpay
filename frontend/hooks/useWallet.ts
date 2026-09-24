@@ -15,7 +15,9 @@ export function useWallet() {
 
   const getWalletClient = useCallback(async (): Promise<WalletClient | null> => {
     if (!privyWallet) return null
-    await privyWallet.switchChain(monadTestnet.id)
+    try {
+      await privyWallet.switchChain(monadTestnet.id)
+    } catch { /* already on chain or unsupported — proceed */ }
     try {
       // Privy ConnectedWallet exposes a viem wallet client
       const wc = (privyWallet as unknown as { getWalletClient: (chain?: number) => Promise<WalletClient> })

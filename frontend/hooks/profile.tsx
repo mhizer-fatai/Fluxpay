@@ -24,9 +24,14 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   }, [getAccessToken])
 
   const refresh = useCallback(async () => {
-    if (!authenticated || !address) {
+    if (!authenticated) {
       setStatus('anonymous')
       setProfile(null)
+      return
+    }
+    // Embedded wallet may still be creating right after login — wait for an address
+    if (!address) {
+      setStatus('loading')
       return
     }
     setStatus('loading')
@@ -40,7 +45,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         setProfile(null)
         setStatus('needs_onboarding')
       } else {
-        // network/other error: treat as onboarding-needed to avoid dead ends, keep null profile
+        // backend unreachable: keep the user where they are instead of dead-ending
         setProfile(null)
         setStatus('needs_onboarding')
       }
@@ -48,8 +53,23 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   }, [authenticated, address])
 
   useEffect(() => {
-    if (ready) void refresh()
+    if (!ready) return
+    void refresh()
   }, [ready, refresh])
+
+  // If authenticated but wallet not ready yet, poll briefly before deciding anything.
+  useEffect(() => {
+    if (!ready || !authenticated || address) return
+    let tries = 0
+    const timer = setInterval(() => {
+      tries += 1
+      if (address || tries > 15) {
+        clearInterval(timer)
+        void refresh()
+      }
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [ready, authenticated, address, refresh])
 
   const completeOnboarding = useCallback(
     async (args: { username: string; txHash: string; fullName: string; email?: string }) => {
