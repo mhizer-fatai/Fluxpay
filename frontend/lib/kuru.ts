@@ -1,10 +1,12 @@
 import { ethers } from 'ethers'
 import * as KuruSdk from '@kuru-labs/kuru-sdk'
-import type { RouteOutput } from '@kuru-labs/kuru-sdk'
+import type { RouteOutput, Pool } from '@kuru-labs/kuru-sdk'
 
-// Kuru testnet (Monad 10143) — docs.kuru.io/contracts/Contract-addresses
+// Kuru testnet (Monad 10143) — router from docs.kuru.io/contracts/Contract-addresses
 export const KURU_ROUTER = '0x1f5A250c4A506DA4cE584173c6ed1890B1bf7187'
 export const KURU_API = (import.meta.env.VITE_KURU_API as string | undefined) ?? 'https://api.testnet.kuru.io'
+
+const ADDRESS_ZERO = ethers.constants.AddressZero
 
 export interface KuruToken {
   symbol: string
@@ -13,17 +15,16 @@ export interface KuruToken {
   decimals: number
 }
 
-const ADDRESS_ZERO = ethers.constants.AddressZero
-
+/**
+ * Tokens with LIVE markets on Kuru testnet (verified against GET /api/v1/markets).
+ * The stale docs addresses (0xf817… USDC etc.) are NOT used.
+ */
 export const KURU_TOKENS: KuruToken[] = [
   { symbol: 'MON', name: 'Monad (native)', address: ADDRESS_ZERO, decimals: 18 },
-  { symbol: 'WMON', name: 'Wrapped Monad', address: '0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701', decimals: 18 },
-  { symbol: 'USDC', name: 'USD Coin', address: '0xf817257fed379853cDe0fa4F97AB987181B1E5Ea', decimals: 6 },
-  { symbol: 'kUSDC', name: 'Kuru USDC', address: '0x6C15057930e0d8724886C09e940c5819fBE65465', decimals: 6 },
-  { symbol: 'USDT', name: 'Tether USD', address: '0x88b8E2161DEDC77EF4ab7585569D2415a1C1055D', decimals: 6 },
-  { symbol: 'DAK', name: 'Dak', address: '0x0F0BDEbF0F83cD1EE3974779Bcb7315f9808c714', decimals: 18 },
-  { symbol: 'CHOG', name: 'Chog', address: '0xE0590015A873bF326bd645c3E1266d4db41C4E6B', decimals: 18 },
-  { symbol: 'YAKI', name: 'Yaki', address: '0xfe140e1dCe99Be9F4F15d657CD9b7BF622270C50', decimals: 18 },
+  { symbol: 'USDC', name: 'Kuru Testnet USDC', address: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', decimals: 6 },
+  { symbol: 'WETH', name: 'Wrapped Ether', address: '0x8b6c5fafef85b030bb1e71ae7ac085cc2380aaf8', decimals: 18 },
+  { symbol: 'XAUT', name: 'Tether Gold', address: '0xee1dce135a9ab598bca8cf3a28bdef6892100740', decimals: 6 },
+  { symbol: 'cbBTC', name: 'Coinbase Wrapped BTC', address: '0xef2a20a161ac9ed1117d721336226b6399f15b4d', decimals: 8 },
 ]
 
 export const kuruTokenBySymbol = (symbol: string) => KURU_TOKENS.find(t => t.symbol === symbol)
@@ -33,20 +34,39 @@ export const kuruProvider = new ethers.providers.JsonRpcProvider(
   (import.meta.env.VITE_RPC_URL as string | undefined) ?? 'https://testnet-rpc.monad.xyz',
 )
 
-/** Bridge a Privy wallet (EIP-1193 provider) into an ethers v5 signer for the Kuru SDK. */
-export async function getKuruSigner(ethereumProvider: unknown): Promise<ethers.Signer> {
-  const web3Provider = new ethers.providers.Web3Provider(ethereumProvider as ethers.providers.ExternalProvider)
-  return web3Provider.getSigner()
+/**
+ * Live orderbook pools from the testnet API.
+ * NOTE: the SDK's PoolFetcher POSTs /markets/filtered which the testnet API rejects
+ * (405) — so we GET /markets ourselves and pass pools directly to PathFinder.
+ */
+let poolsCache: { at: number; pools: Pool[] } | null = null
+export async function fetchTestnetPools(): Promise<Pool[]> {
+  if (poolsCache && Date.now() - poolsCache.at < 60_000) return poolsCache.pools
+  const res = await fetch(`${KURU_API}/api/v1/markets`)
+  if (!res.ok) throw new Error(`Kuru API ${res.status}`)
+  const json = (await res.json()) as { data?: Array<Record<string, unknown>> }
+  const rows = json.data ?? []
+  const pools: Pool[] = rows
+    .map(m => {
+      const rec = m as {
+        marketAddress?: string; baseToken?: { tokenAddress?: string }; quoteToken?: { tokenAddress?: string }
+        baseasset?: string; quoteasset?: string; market?: string
+      }
+      return {
+        orderbook: (rec.marketAddress ?? rec.market ?? '').toLowerCase(),
+        baseToken: (rec.baseToken?.tokenAddress ?? rec.baseasset ?? '').toLowerCase(),
+        quoteToken: (rec.quoteToken?.tokenAddress ?? rec.quoteasset ?? '').toLowerCase(),
+      }
+    })
+    .filter(p => p.baseToken && p.quoteToken && p.orderbook)
+  poolsCache = { at: Date.now(), pools }
+  return pools
 }
 
 /** Best route + expected output for a market swap (human units in). */
-export async function quoteSwap(
-  tokenIn: string,
-  tokenOut: string,
-  amountHuman: number,
-): Promise<RouteOutput> {
-  const poolFetcher = await KuruSdk.PoolFetcher.create(KURU_API)
-  return KuruSdk.PathFinder.findBestPath(kuruProvider, tokenIn, tokenOut, amountHuman, 'amountIn', poolFetcher)
+export async function quoteSwap(tokenIn: string, tokenOut: string, amountHuman: number): Promise<RouteOutput> {
+  const pools = await fetchTestnetPools()
+  return KuruSdk.PathFinder.findBestPath(kuruProvider, tokenIn, tokenOut, amountHuman, 'amountIn', undefined, pools)
 }
 
 /** Execute the swap through the Kuru router; handles ERC-20 approvals. */
@@ -79,4 +99,10 @@ export async function fetchKuruBalance(provider: ethers.providers.Provider, toke
   }
   const contract = new ethers.Contract(token.address, ['function balanceOf(address) view returns (uint256)'], provider)
   return Number(ethers.utils.formatUnits(await contract.balanceOf(address), token.decimals))
+}
+
+/** Bridge a Privy wallet (EIP-1193 provider) into an ethers v5 signer for the Kuru SDK. */
+export async function getKuruSigner(ethereumProvider: unknown): Promise<ethers.Signer> {
+  const web3Provider = new ethers.providers.Web3Provider(ethereumProvider as ethers.providers.ExternalProvider)
+  return web3Provider.getSigner()
 }
