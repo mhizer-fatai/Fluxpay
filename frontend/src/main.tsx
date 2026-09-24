@@ -2,6 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { PrivyProvider } from '@privy-io/react-auth'
+import { monadTestnet } from '@/lib/chain'
+import { ProfileProvider } from '@/hooks/profile'
 import './index.css'
 import App from './App'
 
@@ -13,12 +15,16 @@ createRoot(document.getElementById('root')!).render(
     <PrivyProvider
       appId={privyAppId}
       config={{
+        defaultChain: monadTestnet,
+        supportedChains: [monadTestnet],
         loginMethods: ['google', 'twitter', 'apple', 'email', 'passkey', 'wallet'],
         embeddedWallets: { ethereum: { createOnLogin: 'users-without-wallets' } },
       }}
     >
       <BrowserRouter>
-        <App />
+        <ProfileProvider>
+          <App />
+        </ProfileProvider>
       </BrowserRouter>
     </PrivyProvider>
   </StrictMode>,

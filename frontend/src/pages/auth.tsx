@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePrivy } from '@privy-io/react-auth'
+import { useProfile } from '@/hooks/profile'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 
 const reviews = [
@@ -13,7 +14,8 @@ const reviews = [
 export default function AuthPage() {
   const [index, setIndex] = useState(0)
   const navigate = useNavigate()
-  const { ready, authenticated, login, getAccessToken } = usePrivy()
+  const { ready, authenticated, login } = usePrivy()
+  const { status } = useProfile()
 
   useEffect(() => {
     const timer = setInterval(() => setIndex(i => (i + 1) % reviews.length), 4500)
@@ -22,23 +24,10 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (ready && authenticated) {
-      getAccessToken()
-        .then(async token => {
-          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/me`, {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (res.ok) {
-            const me = await res.json()
-            localStorage.setItem('fluxpay_me', JSON.stringify(me))
-          }
-          navigate('/dashboard')
-        })
-        .catch(err => {
-          console.error('Failed to load profile', err)
-          navigate('/dashboard')
-        })
+      if (status === 'onboarded') navigate('/dashboard', { replace: true })
+      else if (status === 'needs_onboarding') navigate('/onboarding', { replace: true })
     }
-  }, [ready, authenticated, navigate, getAccessToken])
+  }, [ready, authenticated, status, navigate])
 
   const prev = () => setIndex(i => (i - 1 + reviews.length) % reviews.length)
   const next = () => setIndex(i => (i + 1) % reviews.length)
