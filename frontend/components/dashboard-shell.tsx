@@ -1,7 +1,7 @@
 'use client'
 
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useLayoutEffect, useRef, useState, Fragment } from 'react'
+import { useLayoutEffect, useRef, useState, Fragment, useEffect } from 'react'
 import { Bell, Bot, CalendarDays, ChevronDown, CircleHelp, CreditCard, LayoutDashboard, Search, Send, Settings, Sparkles, Wallet, WalletMinimal, ArrowLeftRight, Activity, Link2, Landmark, type LucideIcon } from 'lucide-react'
 import { useProfile } from '@/hooks/profile'
 import { fetchActivity } from '@/lib/activity'
@@ -27,6 +27,11 @@ const nav: NavItem[] = [
   { label: 'AI Terminal', href: '/terminal', icon: Bot, group: 'AI', description: 'Ask the AI about your money' },
 ]
 
+const NOTIF_READ_KEY = 'fluxpay_notif_read'
+const loadReadIds = (): string[] => {
+  try { return JSON.parse(localStorage.getItem(NOTIF_READ_KEY) ?? '[]') as string[] } catch { return [] }
+}
+
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = useLocation().pathname
   const navigate = useNavigate()
@@ -47,7 +52,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<NotifItem[]>([])
   const [notifLoading, setNotifLoading] = useState(false)
   const notifLoaded = useRef(false)
-  const unread = notifications.filter(n => !n.read).length
+  const [readIds, setReadIds] = useState<string[]>(loadReadIds)
+  const unread = notifications.filter(n => !readIds.includes(n.id)).length
   const current = nav[activeIndex >= 0 ? activeIndex : 0]?.label || 'Overview'
 
   const displayName = profile?.fullName || profile?.username || 'FluxPay user'
@@ -69,6 +75,36 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     indicator.style.width = `${link.offsetWidth}px`
     indicator.style.transform = `translateX(${link.offsetLeft}px)`
   }, [currentIndex, pathname])
+
+  // Live event push from the backend chain watcher (Redis → WS fan-out).
+  useEffect(() => {
+    if (!address) return
+    const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/^http/, 'ws')
+    let socket: WebSocket | null = null
+    let closed = false
+    try {
+      socket = new WebSocket(`${wsUrl}/ws/activity?address=${address.toLowerCase()}`)
+      socket.onmessage = ev => {
+        try {
+          const msg = JSON.parse(ev.data as string) as { type?: string; txHash?: string; amount?: number; tokenLabel?: string; from?: string; to?: string; username?: string }
+          if (!msg.txHash) return
+          const id = `${msg.type}:${msg.txHash}`
+          const item: NotifItem = msg.type === 'username_registered'
+            ? { id, title: 'Username registered', body: `@${msg.username} is now yours on-chain`, time: 'Just now', read: false }
+            : {
+                id,
+                title: msg.type === 'payment_settled' && msg.to?.toLowerCase() === address.toLowerCase() ? 'Payment received' : 'Payment sent',
+                body: `${msg.type === 'payment_settled' && msg.to?.toLowerCase() === address.toLowerCase() ? '+' : '−'}${msg.amount ?? '?'} ${msg.tokenLabel ?? ''} ${msg.to?.toLowerCase() === address.toLowerCase() ? `from ${shortAddr(msg.from ?? '')}` : `to ${shortAddr(msg.to ?? '')}`}`,
+                time: 'Just now',
+                read: false,
+              }
+          setNotifications(prev => (prev.some(n => n.id === id) ? prev : [item, ...prev].slice(0, 12)))
+        } catch { /* ignore malformed frames */ }
+      }
+      socket.onclose = () => { if (!closed) setTimeout(() => { /* browser reconnect handled on next mount */ }, 1000) }
+    } catch { /* ws unavailable */ }
+    return () => { closed = true; socket?.close() }
+  }, [address])
 
   const openNotifications = (e: React.MouseEvent) => {
     setNotif({ x: e.clientX, y: e.clientY })
@@ -189,7 +225,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <div className="notif-panel" style={{ left: notif.x, top: notif.y + 12 }} onClick={e => e.stopPropagation()}>
             <div className="notif-head">
               <strong>Notifications</strong>
-              <button className="notif-readall" onClick={() => setNotifications(prev => prev.map(n => ({ ...n, read: true })))}>Mark all as read</button>
+              <button className="notif-readall" onClick={() => { const ids = notifications.map(n => n.id); setReadIds(prev => { const next = [...new Set([...prev, ...ids])]; localStorage.setItem(NOTIF_READ_KEY, JSON.stringify(next.slice(-100))); return next }) }}>Mark all as read</button>
             </div>
             <div className="notif-list">
               {notifLoading && <div className="notif-item"><div className="notif-body"><small>Loading on-chain activity…</small></div></div>}
@@ -197,7 +233,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <div className="notif-item"><div className="notif-body"><strong>You're all caught up</strong><small>Recent payments will show up here.</small></div></div>
               )}
               {notifications.map(n => (
-                <div className={`notif-item${n.read ? '' : ' unread'}`} key={n.id}>
+                <div className={`notif-item${readIds.includes(n.id) ? '' : ' unread'}`} key={n.id}>
                   <span className="notif-dot" />
                   <div className="notif-body"><strong>{n.title}</strong><small>{n.body}</small></div>
                   <span className="notif-time">{n.time}</span>

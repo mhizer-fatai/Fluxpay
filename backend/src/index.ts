@@ -7,6 +7,7 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { registryRouter } from "./routes/registry.js";
 import { meRouter } from "./routes/me.js";
 import { profileRouter } from "./routes/profile.js";
+import { startChainWatcher } from "./watcher.js";
 
 export function createApp(): express.Express {
   const app = express();
@@ -34,4 +35,5 @@ startWsGateway(server);
 
 server.listen(config.port, () => {
   console.log(`[fluxpay-backend] listening on :${config.port}`);
+  startChainWatcher();
 });
