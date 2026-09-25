@@ -28,7 +28,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!address) return
     void listStreams(address).then(setStreams).catch(() => setStreams([]))
-    void fetchActivity(address, 50_000).then(items => setActivity(items.slice(0, 6))).catch(() => setActivity([]))
+    void fetchActivity(address, 10_000).then(items => setActivity(items.slice(0, 6))).catch(() => setActivity([]))
   }, [address])
 
   const hour = new Date().getHours()
@@ -49,7 +49,7 @@ export default function DashboardPage() {
     if (!address) return
     setExporting(true)
     try {
-      const items = await fetchActivity(address, 200_000)
+      const items = await fetchActivity(address, 40_000)
       const header = 'date,type,token,amount,counterparty,tx\n'
       const body = items
         .map(i => `${new Date(i.ts * 1000).toISOString()},${i.event},${i.token ?? ''},${i.amount},${i.counterparty},${i.hash}`)

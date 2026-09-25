@@ -21,7 +21,7 @@ export default function WalletPage() {
   useEffect(() => {
     if (!address) return
     setActivityLoading(true)
-    fetchActivity(address, 50_000)
+    fetchActivity(address, 10_000)
       .then(items => setActivity(items.slice(0, 5)))
       .catch(() => setActivity([]))
       .finally(() => setActivityLoading(false))

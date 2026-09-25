@@ -84,7 +84,7 @@ export default function SendPage() {
   useEffect(() => { void getUsdPrices().then(setPrices) }, [])
   useEffect(() => {
     if (!address) return
-    fetchActivity(address, 50_000)
+    fetchActivity(address, 10_000)
       .then(items => {
         const seen = new Set<string>()
         const out: Array<{ addr: string; last: string }> = []

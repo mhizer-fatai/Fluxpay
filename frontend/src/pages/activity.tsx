@@ -28,7 +28,7 @@ export default function ActivityPage() {
     if (!address) return
     setLoading(true)
     setError('')
-    fetchActivity(address, 200_000)
+    fetchActivity(address, 40_000)
       .then(setItems)
       .catch(e => setError((e as Error).message || 'Failed to load activity'))
       .finally(() => setLoading(false))

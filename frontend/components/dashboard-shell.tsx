@@ -111,7 +111,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     if (notifLoaded.current || !address) return
     notifLoaded.current = true
     setNotifLoading(true)
-    fetchActivity(address, 20_000)
+    fetchActivity(address, 10_000)
       .then(items => {
         setNotifications(
           items.slice(0, 8).map(i => ({
