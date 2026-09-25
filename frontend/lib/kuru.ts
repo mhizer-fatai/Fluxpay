@@ -85,12 +85,14 @@ export async function getKuruSigner(ethereumProvider: unknown): Promise<ethers.S
 export interface DirectQuote {
   market: Address
   side: 'sell' | 'buy' // sell base for quote | spend quote to buy base
-  inputRaw: bigint
+  inputRaw: bigint // human → raw token units (msg.value for native, display)
+  inputUnits: bigint // human → market precision units (the _size/_quoteAmount chain arg)
   outputRaw: bigint // estimated, before slippage
   minOutRaw: bigint // after slippage
   bid: bigint
   ask: bigint
   pricePrecision: bigint
+  sizePrecision: bigint
   from: KuruToken
   to: KuruToken
 }
@@ -105,15 +107,30 @@ function findMarket(from: Address, to: Address): { market: DirectMarket; side: '
   return null
 }
 
-async function pricePrecisionOf(market: Address): Promise<bigint> {
+async function marketPrecisions(market: Address): Promise<{ pricePrecision: bigint; sizePrecision: bigint }> {
+  const fallback: Record<string, { pricePrecision: bigint; sizePrecision: bigint }> = {
+    '0xfdbe356828c8f5a5d5ed4f69dde0816f4058ef61': { pricePrecision: 1000000n, sizePrecision: 100000000n },
+    '0xa9c2936656a7d2143720bcd91ba8506200b7cbe7': { pricePrecision: 100n, sizePrecision: 10000000000n },
+    '0x5bdea6f9f9aba34f4ecb9b865646a792b835ef7f': { pricePrecision: 100n, sizePrecision: 100000000n },
+    '0x0b4dd2a7b09d5c5401149ffe51301cc589017343': { pricePrecision: 100n, sizePrecision: 1000000n },
+  }
   try {
     const res = await fetch(`${KURU_API}/api/v1/markets`)
-    if (!res.ok) return 100n
-    const json = (await res.json()) as { data?: Array<{ marketAddress?: string; pricePrecision?: string }> }
-    const row = (json.data ?? []).find(m => m.marketAddress?.toLowerCase() === market.toLowerCase())
-    if (row?.pricePrecision) return BigInt(row.pricePrecision)
+    if (res.ok) {
+      const json = (await res.json()) as {
+        data?: Array<{ marketAddress?: string; pricePrecision?: string; sizePrecision?: string }>
+      }
+      const row = (json.data ?? []).find(m => m.marketAddress?.toLowerCase() === market.toLowerCase())
+      if (row?.pricePrecision && row?.sizePrecision) {
+        return { pricePrecision: BigInt(row.pricePrecision), sizePrecision: BigInt(row.sizePrecision) }
+      }
+    }
   } catch { /* fallback below */ }
-  return 100n
+  return fallback[market.toLowerCase()] ?? { pricePrecision: 100n, sizePrecision: 100000000n }
+}
+
+async function pricePrecisionOf(market: Address): Promise<bigint> {
+  return (await marketPrecisions(market)).pricePrecision
 }
 
 /**
@@ -136,29 +153,27 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
     abi: marketAbi,
     functionName: 'bestBidAsk',
   })) as readonly [bigint, bigint]
-  const P = await pricePrecisionOf(market.market)
+  const { pricePrecision: P, sizePrecision: S } = await marketPrecisions(market.market)
 
   if (side === 'sell') {
     if (bid === 0n) throw new Error(`no bids on ${fromSymbol}/USDC right now — nobody to sell to`)
     const inputRaw = BigInt(Math.round(amountHuman * 10 ** from.decimals))
-    // out(quoteRaw) = in(baseRaw) × bid / P, adjusted for decimals
-    const decAdj = 10n ** BigInt(Math.max(0, from.decimals - to.decimals))
-    const decMul = 10n ** BigInt(Math.max(0, to.decimals - from.decimals))
-    const outputRaw = (inputRaw * bid * decMul) / P / decAdj
-    if (outputRaw <= 0n) throw new Error('amount too small for this market')
+    const inputUnits = BigInt(Math.round(amountHuman * Number(S)))
+    // out(quoteRaw) = amountHuman × bid/P × 10^quoteDec
+    const outputRaw = (BigInt(Math.round(amountHuman * 1e6)) * bid * BigInt(10 ** to.decimals)) / P / 1000000n
+    if (outputRaw <= 0n || inputUnits <= 0n) throw new Error('amount too small for this market')
     const minOutRaw = (outputRaw * BigInt(Math.round((100 - slippagePct) * 100))) / 10000n
-    return { market: market.market, side, inputRaw, outputRaw, minOutRaw, bid, ask, pricePrecision: P, from, to }
+    return { market: market.market, side, inputRaw, inputUnits, outputRaw, minOutRaw, bid, ask, pricePrecision: P, sizePrecision: S, from, to }
   }
 
   if (ask === 0n) throw new Error(`no asks on ${toSymbol}/USDC right now — nothing to buy`)
   const inputRaw = BigInt(Math.round(amountHuman * 10 ** from.decimals))
-  // spending quote Q to buy base: out(baseRaw) = Q × P / ask × 10^(baseDec - quoteDec)
-  const decMul = 10n ** BigInt(Math.max(0, to.decimals - from.decimals))
-  const decAdj = 10n ** BigInt(Math.max(0, from.decimals - to.decimals))
-  const outputRaw = (inputRaw * P * decMul) / ask / decAdj
-  if (outputRaw <= 0n) throw new Error('amount too small for this market')
+  const inputUnits = BigInt(Math.round(amountHuman * Number(P)))
+  // spending Q quote to buy base: out(baseRaw) = Q × P/ask × 10^baseDec
+  const outputRaw = (BigInt(Math.round(amountHuman * 1e6)) * P * BigInt(10 ** to.decimals)) / ask / 1000000n
+  if (outputRaw <= 0n || inputUnits <= 0n) throw new Error('amount too small for this market')
   const minOutRaw = (outputRaw * BigInt(Math.round((100 - slippagePct) * 100))) / 10000n
-  return { market: market.market, side, inputRaw, outputRaw, minOutRaw, bid, ask, pricePrecision: P, from, to }
+  return { market: market.market, side, inputRaw, inputUnits, outputRaw, minOutRaw, bid, ask, pricePrecision: P, sizePrecision: S, from, to }
 }
 
 /**
@@ -190,6 +205,9 @@ export async function executeSwap(opts: {
 
   const functionName = quote.side === 'sell' ? 'placeAndExecuteMarketSell' : 'placeAndExecuteMarketBuy'
 
+  // Chain arg is in MARKET PRECISION units (_size = human × sizePrecision,
+  // _quoteAmount = human × pricePrecision); value/approve stay raw.
+
   // The public testnet RPC load-balances across nodes that can be briefly out of
   // sync, so a single simulation may falsely reject. Retry, then fall back to
   // non-FOK (partial fills allowed, minOut still enforced on-chain).
@@ -205,7 +223,7 @@ export async function executeSwap(opts: {
         address: quote.market,
         abi: marketAbi,
         functionName,
-        args: [quote.inputRaw, quote.minOutRaw, false, true],
+        args: [quote.inputUnits, quote.minOutRaw, false, true],
         value: inputIsNative ? quote.inputRaw : 0n,
       })
       simulated = true
@@ -221,7 +239,7 @@ export async function executeSwap(opts: {
         address: quote.market,
         abi: marketAbi,
         functionName,
-        args: [quote.inputRaw, quote.minOutRaw, false, false],
+        args: [quote.inputUnits, quote.minOutRaw, false, false],
         value: inputIsNative ? quote.inputRaw : 0n,
       })
       simulated = true
@@ -242,7 +260,7 @@ export async function executeSwap(opts: {
     address: quote.market,
     abi: marketAbi,
     functionName,
-    args: [quote.inputRaw, quote.minOutRaw, false, fok],
+    args: [quote.inputUnits, quote.minOutRaw, false, fok],
     value: inputIsNative ? quote.inputRaw : 0n,
   })
   await publicClient.waitForTransactionReceipt({ hash: txHash })
