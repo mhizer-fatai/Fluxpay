@@ -1,30 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ExternalLink } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ExternalLink } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { Dropdown } from '@/components/dropdown'
 import { useWallet } from '@/hooks/useWallet'
 import {
-  executeSwap, fetchKuruBalance, getKuruSigner, KURU_TOKENS, kuruProvider, kuruTokenBySymbol, quoteSwap,
-  type KuruToken,
+  executeSwap, fetchKuruBalance, formatQuoteAmount, KURU_TOKENS, kuruProvider, kuruTokenBySymbol, quoteSwap,
+  type DirectQuote, type KuruToken,
 } from '@/lib/kuru'
 import { EXPLORER_URL } from '@/lib/chain'
 
-type Phase = 'idle' | 'quoting' | 'approving' | 'swapping' | 'success' | 'error'
-
-interface Quote {
-  output: number
-  priceImpact: number
-  hops: number
-  route: string[]
-}
+type Phase = 'idle' | 'quoting' | 'approving' | 'simulating' | 'swapping' | 'success' | 'error'
 
 export default function SwapPage() {
-  const { wallet, address } = useWallet()
+  const { address, getWalletClient } = useWallet()
   const [fromSym, setFromSym] = useState('MON')
   const [toSym, setToSym] = useState('USDC')
   const [amount, setAmount] = useState('')
   const [slippage, setSlippage] = useState(1)
-  const [quote, setQuote] = useState<Quote | null>(null)
+  const [quote, setQuote] = useState<DirectQuote | null>(null)
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [phase, setPhase] = useState<Phase>('idle')
   const [statusMsg, setStatusMsg] = useState('')
@@ -49,7 +42,7 @@ export default function SwapPage() {
   }, [address, txHash])
 
   useEffect(() => {
-    const key = `${fromSym}-${toSym}-${amount}`
+    const key = `${fromSym}-${toSym}-${amount}-${slippage}`
     if (!amt || amt <= 0 || fromSym === toSym) { setQuote(null); quoteFor.current = ''; return }
     if (quoteFor.current === key) return
     quoteFor.current = key
@@ -57,54 +50,39 @@ export default function SwapPage() {
     setQuote(null)
     const timer = setTimeout(async () => {
       try {
-        const route = await quoteSwap(from.address, to.address, amt)
-        if (route.route.path.length === 0 || route.output <= 0) {
-          setQuote(null)
-          setError(`No liquidity on Kuru for ${fromSym} → ${toSym} right now. Try another pair.`)
-          setPhase('idle')
-          return
-        }
-        setQuote({
-          output: route.output,
-          priceImpact: route.priceImpact,
-          hops: route.route.path.length,
-          route: route.route.path.map(p => `${p.baseToken.slice(0, 6)}…/${p.quoteToken.slice(0, 6)}…`),
-        })
+        const q = await quoteSwap(fromSym, toSym, amt, slippage)
+        setQuote(q)
         setError('')
         setPhase('idle')
       } catch (e) {
         setQuote(null)
-        setError((e as Error).message || 'Quote failed — is the Kuru API reachable?')
+        setError((e as Error).message || 'Quote failed')
         setPhase('idle')
       }
     }, 600)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromSym, toSym, amount])
-
-  const minReceived = useMemo(() => (quote ? quote.output * (1 - slippage / 100) : 0), [quote, slippage])
+  }, [fromSym, toSym, amount, slippage])
 
   const swap = async () => {
     setError('')
-    if (!wallet || !address) return setError('Wallet not ready — log in first.')
+    if (!address) return setError('Wallet not ready — log in first.')
     if (!quote) return setError('No valid quote — adjust the amount.')
     try {
-      setPhase('approving')
-      setStatusMsg('Checking token approval…')
-      const ethereumProvider = await (wallet as unknown as { getEthereumProvider: () => Promise<unknown> }).getEthereumProvider()
-      const signer = await getKuruSigner(ethereumProvider)
-      setPhase('swapping')
-      setStatusMsg('Swapping on Kuru…')
-      const receipt = await executeSwap({
-        signer,
-        routeOutput: await quoteSwap(from.address, to.address, amt),
-        size: amt,
-        tokenInDecimals: from.decimals,
-        tokenOutDecimals: to.decimals,
-        slippagePct: slippage,
-        onApprove: hash => { if (hash) setStatusMsg('Approval sent — continuing after confirmation…') },
+      const walletClient = await getWalletClient()
+      if (!walletClient) throw new Error('wallet_unavailable')
+      const { txHash: hash } = await executeSwap({
+        walletClient,
+        ownerAddress: address as `0x${string}`,
+        quote,
+        onStatus: s => {
+          setPhase(s === 'approving' ? 'approving' : s === 'simulating' ? 'simulating' : 'swapping')
+          setStatusMsg(
+            s === 'approving' ? 'Approving token…' : s === 'simulating' ? 'Simulating on Monad…' : 'Swapping on Kuru…',
+          )
+        },
       })
-      setTxHash(receipt.transactionHash)
+      setTxHash(hash)
       setPhase('success')
       setStatusMsg('')
       quoteFor.current = ''
@@ -162,10 +140,10 @@ export default function SwapPage() {
           {phase === 'quoting' && <p className="sn-hint">Finding the best route on Kuru…</p>}
           {quote && (
             <div className="sn-summary">
-              <div className="sn-sum-row"><span>You receive (est.)</span><strong>{quote.output.toLocaleString('en-US', { maximumFractionDigits: 6 })} {to.symbol}</strong></div>
-              <div className="sn-sum-row"><span>Minimum received</span><strong>{minReceived.toLocaleString('en-US', { maximumFractionDigits: 6 })} {to.symbol}</strong></div>
-              <div className="sn-sum-row"><span>Price impact</span><strong className={quote.priceImpact > 2 ? '' : 'up'}>{quote.priceImpact.toFixed(2)}%</strong></div>
-              <div className="sn-sum-row"><span>Route hops</span><strong>{quote.hops}</strong></div>
+              <div className="sn-sum-row"><span>You receive (est.)</span><strong>{formatQuoteAmount(quote.outputRaw, to.decimals)} {to.symbol}</strong></div>
+              <div className="sn-sum-row"><span>Minimum received</span><strong>{formatQuoteAmount(quote.minOutRaw, to.decimals)} {to.symbol}</strong></div>
+              <div className="sn-sum-row"><span>Market</span><strong>{quote.side === 'sell' ? `Sell ${from.symbol}` : `Buy ${to.symbol}`} · top of book</strong></div>
+              <div className="sn-sum-row"><span>Bid / Ask</span><strong>{quote.bid.toString()} / {quote.ask === 0n ? '—' : quote.ask.toString()}</strong></div>
             </div>
           )}
           {error && <p style={{ color: '#ef4444', fontSize: 13, marginTop: 10 }}>{error}</p>}
@@ -181,9 +159,9 @@ export default function SwapPage() {
             </div>
           ) : (
             <>
-              <div className="sn-fee-row"><span>DEX</span><strong>Kuru Flow (orderbook)</strong></div>
+              <div className="sn-fee-row"><span>DEX</span><strong>Kuru orderbook (direct market)</strong></div>
               <button className="ov-btn primary" style={{ width: '100%', marginTop: 12 }} onClick={swap} disabled={!canSwap}>
-                {phase === 'approving' ? 'Approving…' : phase === 'swapping' ? 'Swapping…' : amt <= (balances[fromSym] ?? 0) ? 'Swap' : `Insufficient ${from.symbol}`}
+                {phase === 'approving' ? 'Approving…' : phase === 'simulating' ? 'Simulating…' : phase === 'swapping' ? 'Swapping…' : amt <= (balances[fromSym] ?? 0) ? 'Swap' : `Insufficient ${from.symbol}`}
               </button>
             </>
           )}
