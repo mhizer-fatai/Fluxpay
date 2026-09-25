@@ -4,12 +4,18 @@ import { DashboardShell } from '@/components/dashboard-shell'
 import { Dropdown } from '@/components/dropdown'
 import { useWallet } from '@/hooks/useWallet'
 import {
-  executeSwap, fetchKuruBalance, formatQuoteAmount, KURU_TOKENS, kuruProvider, kuruTokenBySymbol, quoteSwap,
+  executeSwap, fetchKuruBalance, formatQuoteAmount, KURU_TOKENS, kuruProvider, kuruTokenBySymbol, mintKuruUsdc, quoteSwap,
   type DirectQuote, type KuruToken,
 } from '@/lib/kuru'
 import { EXPLORER_URL } from '@/lib/chain'
 
 type Phase = 'idle' | 'quoting' | 'approving' | 'simulating' | 'swapping' | 'success' | 'error'
+
+const shortErr = (e: unknown) => {
+  const err = e as Error & { shortMessage?: string; reason?: string }
+  const msg = err.shortMessage || err.reason || err.message || 'Transaction failed'
+  return msg.length > 180 ? `${msg.slice(0, 180)}…` : msg
+}
 
 export default function SwapPage() {
   const { address, wallet } = useWallet()
@@ -23,6 +29,8 @@ export default function SwapPage() {
   const [statusMsg, setStatusMsg] = useState('')
   const [error, setError] = useState('')
   const [txHash, setTxHash] = useState<string | null>(null)
+  const [faucetBusy, setFaucetBusy] = useState(false)
+  const [faucetMsg, setFaucetMsg] = useState('')
   const quoteFor = useRef('')
 
   const from = kuruTokenBySymbol(fromSym)!
@@ -39,7 +47,22 @@ export default function SwapPage() {
       if (alive) setBalances(Object.fromEntries(entries))
     })()
     return () => { alive = false }
-  }, [address, txHash])
+  }, [address, txHash, faucetMsg])
+
+  const faucet = async () => {
+    setFaucetMsg('')
+    if (!wallet || !address) return setFaucetMsg('Log in first.')
+    setFaucetBusy(true)
+    try {
+      const ethereumProvider = await (wallet as unknown as { getEthereumProvider: () => Promise<unknown> }).getEthereumProvider()
+      await mintKuruUsdc(ethereumProvider, address as `0x${string}`, 100)
+      setFaucetMsg('+100 kUSDC minted to your wallet')
+    } catch (e) {
+      setFaucetMsg(shortErr(e))
+    } finally {
+      setFaucetBusy(false)
+    }
+  }
 
   useEffect(() => {
     const key = `${fromSym}-${toSym}-${amount}-${slippage}`
@@ -86,8 +109,7 @@ export default function SwapPage() {
       setStatusMsg(partialFill ? 'Filled partially — thin book, min-out enforced.' : '')
       quoteFor.current = ''
     } catch (e) {
-      const err = e as Error & { shortMessage?: string }
-      setError(err.shortMessage || err.message || 'Swap failed')
+      setError(shortErr(e))
       setPhase('error')
       setStatusMsg('')
     }
@@ -95,7 +117,7 @@ export default function SwapPage() {
 
   const canSwap = amt > 0 && !!quote && phase !== 'swapping' && phase !== 'approving' && amt <= (balances[fromSym] ?? 0)
 
-  const tokenOptions = KURU_TOKENS.map(t => ({ value: t.symbol, label: `${t.symbol} — ${t.name}` }))
+  const tokenOptions = KURU_TOKENS.map(t => ({ value: t.symbol, label: t.symbol === 'USDC' ? 'USDC(Kuru)' : t.symbol }))
 
   const tokenRow = (t: KuruToken, label: string, sym: string, onSym: (s: string) => void, disabled?: string) => (
     <div className="sn-field">
@@ -112,7 +134,11 @@ export default function SwapPage() {
     <section className="dashboard-content sn">
       <div className="sn-head">
         <h1>Swap</h1>
+        <div className="ov-welcome-actions">
+          <button className="ov-btn" onClick={faucet} disabled={faucetBusy || !address}>{faucetBusy ? 'Minting…' : 'Faucet: +100 kUSDC'}</button>
+        </div>
       </div>
+      {faucetMsg && <p className="sn-hint" style={{ marginBottom: 10 }}>{faucetMsg}</p>}
 
       <div className="sn-form-wrap">
         <div className="sn-panel">
@@ -141,8 +167,10 @@ export default function SwapPage() {
             <div className="sn-summary">
               <div className="sn-sum-row"><span>You receive (est.)</span><strong>{formatQuoteAmount(quote.outputRaw, to.decimals)} {to.symbol}</strong></div>
               <div className="sn-sum-row"><span>Minimum received</span><strong>{formatQuoteAmount(quote.minOutRaw, to.decimals)} {to.symbol}</strong></div>
-              <div className="sn-sum-row"><span>Market</span><strong>{quote.side === 'sell' ? `Sell ${from.symbol}` : `Buy ${to.symbol}`} · top of book</strong></div>
+              <div className="sn-sum-row"><span>Market</span><strong>{quote.kind === 'wrap' ? (quote.side === 'wrap' ? 'Wrap MON → WMON · 1:1' : 'Unwrap WMON → MON · 1:1') : `${quote.side === 'sell' ? `Sell ${from.symbol}` : `Buy ${to.symbol}`} · top of book`}</strong></div>
+              {quote.kind === 'kuru' && (
               <div className="sn-sum-row"><span>Bid / Ask</span><strong>{quote.bid.toString()} / {quote.ask === 0n ? '—' : quote.ask.toString()}</strong></div>
+              )}
             </div>
           )}
           {error && <p style={{ color: '#ef4444', fontSize: 13, marginTop: 10 }}>{error}</p>}
@@ -158,7 +186,7 @@ export default function SwapPage() {
             </div>
           ) : (
             <>
-              <div className="sn-fee-row"><span>DEX</span><strong>Kuru orderbook (direct market)</strong></div>
+              <div className="sn-fee-row"><span>DEX</span><strong>{quote && quote.kind === 'wrap' ? 'FluxPay wrap (1:1)' : 'Kuru orderbook (direct market)'}</strong></div>
               <button className="ov-btn primary" style={{ width: '100%', marginTop: 12 }} onClick={swap} disabled={!canSwap}>
                 {phase === 'approving' ? 'Approving…' : phase === 'simulating' ? 'Simulating…' : phase === 'swapping' ? 'Swapping…' : amt <= (balances[fromSym] ?? 0) ? 'Swap' : `Insufficient ${from.symbol}`}
               </button>

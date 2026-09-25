@@ -15,6 +15,9 @@ export const KURU_API = (import.meta.env.VITE_KURU_API as string | undefined) ??
 
 const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000' as Address
 
+export const KURU_USDC: Address = '0xee0722ead54f1b4fe97be399be43bc0226a6f97e'
+export const CIRCLE_USDC: Address = '0x534b2f3A21130d7a60830c2Df862319e593943A3'
+
 export interface KuruToken {
   symbol: string
   name: string
@@ -25,6 +28,7 @@ export interface KuruToken {
 /** Tokens with LIVE markets on Kuru testnet (verified against GET /api/v1/markets + bestBidAsk). */
 export const KURU_TOKENS: KuruToken[] = [
   { symbol: 'MON', name: 'Monad (native)', address: ADDRESS_ZERO, decimals: 18 },
+  { symbol: 'WMON', name: 'Wrapped Monad (FluxPay)', address: '0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541', decimals: 18 },
   { symbol: 'USDC', name: 'Kuru Testnet USDC', address: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', decimals: 6 },
   { symbol: 'WETH', name: 'Wrapped Ether', address: '0x8b6c5fafef85b030bb1e71ae7ac085cc2380aaf8', decimals: 18 },
   { symbol: 'XAUT', name: 'Tether Gold', address: '0xee1dce135a9ab598bca8cf3a28bdef6892100740', decimals: 6 },
@@ -81,9 +85,25 @@ export async function getKuruSigner(ethereumProvider: unknown): Promise<ethers.S
   return web3Provider.getSigner()
 }
 
+/**
+ * Mint Kuru testnet USDC to an address. The mock exposes open minting
+ * (verified live via eth_call) — 100 USDC per click for swap testing.
+ * NOTE: explicit gasLimit — estimation via the viem-based signing stack
+ * systematically reverts against testnet-rpc's balancer; execution itself is fine.
+ */
+export async function mintKuruUsdc(ethereumProvider: unknown, to: Address, amountHuman = 100): Promise<Hash> {
+  const provider = new ethers.providers.Web3Provider(ethereumProvider as ethers.providers.ExternalProvider)
+  const signer = provider.getSigner()
+  const token = new ethers.Contract(KURU_USDC, ['function mint(address to, uint256 amount)'], signer)
+  const tx = await token.mint(to, ethers.utils.parseUnits(String(amountHuman), 6), { gasLimit: 150000 })
+  const receipt = await tx.wait()
+  return receipt.transactionHash as Hash
+}
+
 export interface DirectQuote {
+  kind: 'kuru' | 'wrap'
   market: Address
-  side: 'sell' | 'buy' // sell base for quote | spend quote to buy base
+  side: 'sell' | 'buy' | 'wrap' | 'unwrap'
   inputRaw: bigint // human → raw token units (msg.value for native, display)
   inputUnits: bigint // human → market precision units (the _size/_quoteAmount chain arg)
   outputRaw: bigint // estimated, before slippage
@@ -132,6 +152,44 @@ async function pricePrecisionOf(market: Address): Promise<bigint> {
   return (await marketPrecisions(market)).pricePrecision
 }
 
+const WMON_FLUXPAY = '0xfb8bf4c1cc7a94c73d209a149ea2abea852bc541'
+
+const WRAP_ABI = [
+  'function deposit() payable',
+  'function withdraw(uint256 amount)',
+]
+
+/** Is this pair a MON↔FluxPay-WMON wrap (always executable, 1:1, no liquidity needed)? */
+export function isWrapPair(from: KuruToken, to: KuruToken): 'wrap' | 'unwrap' | null {
+  const f = from.address.toLowerCase()
+  const t = to.address.toLowerCase()
+  if (f === ADDRESS_ZERO.toLowerCase() && t === WMON_FLUXPAY) return 'wrap'
+  if (f === WMON_FLUXPAY && t === ADDRESS_ZERO.toLowerCase()) return 'unwrap'
+  return null
+}
+
+export function quoteWrap(from: KuruToken, to: KuruToken, amountHuman: number): DirectQuote {
+  const inputRaw = BigInt(Math.round(amountHuman * 10 ** from.decimals))
+  if (inputRaw <= 0n) throw new Error('amount too small')
+  const side = isWrapPair(from, to)
+  if (!side) throw new Error('not a wrap pair')
+  return {
+    kind: 'wrap',
+    market: to.address === ADDRESS_ZERO ? from.address : to.address,
+    side,
+    inputRaw,
+    inputUnits: inputRaw,
+    outputRaw: inputRaw,
+    minOutRaw: inputRaw,
+    bid: 0n,
+    ask: 0n,
+    pricePrecision: 1n,
+    sizePrecision: 1n,
+    from,
+    to,
+  }
+}
+
 /**
  * Quote a DIRECT market swap using live bestBidAsk.
  * Output estimate assumes the top-of-book price holds for the full size (fine for demo sizes;
@@ -142,6 +200,8 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
   const to = kuruTokenBySymbol(toSymbol)
   if (!from || !to) throw new Error(`unsupported pair ${fromSymbol} → ${toSymbol}`)
   if (fromSymbol === toSymbol) throw new Error('pick two different tokens')
+
+  if (isWrapPair(from, to)) return quoteWrap(from, to, amountHuman)
 
   const found = findMarket(from.address, to.address)
   if (!found) throw new Error(`no direct Kuru market for ${fromSymbol} → ${toSymbol} (all markets quote in USDC)`)
@@ -162,7 +222,7 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
     const outputRaw = (BigInt(Math.round(amountHuman * 1e6)) * bid * BigInt(10 ** to.decimals)) / P / 1000000n
     if (outputRaw <= 0n || inputUnits <= 0n) throw new Error('amount too small for this market')
     const minOutRaw = (outputRaw * BigInt(Math.round((100 - slippagePct) * 100))) / 10000n
-    return { market: market.market, side, inputRaw, inputUnits, outputRaw, minOutRaw, bid, ask, pricePrecision: P, sizePrecision: S, from, to }
+    return { kind: 'kuru', market: market.market, side, inputRaw, inputUnits, outputRaw, minOutRaw, bid, ask, pricePrecision: P, sizePrecision: S, from, to }
   }
 
   if (ask === 0n) throw new Error(`no asks on ${toSymbol}/USDC right now — nothing to buy`)
@@ -172,7 +232,7 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
   const outputRaw = (BigInt(Math.round(amountHuman * 1e6)) * P * BigInt(10 ** to.decimals)) / ask / 1000000n
   if (outputRaw <= 0n || inputUnits <= 0n) throw new Error('amount too small for this market')
   const minOutRaw = (outputRaw * BigInt(Math.round((100 - slippagePct) * 100))) / 10000n
-  return { market: market.market, side, inputRaw, inputUnits, outputRaw, minOutRaw, bid, ask, pricePrecision: P, sizePrecision: S, from, to }
+  return { kind: 'kuru', market: market.market, side, inputRaw, inputUnits, outputRaw, minOutRaw, bid, ask, pricePrecision: P, sizePrecision: S, from, to }
 }
 
 /**
@@ -192,6 +252,28 @@ export async function executeSwap(opts: {
   const { ownerAddress, quote } = opts
   const provider = new ethers.providers.Web3Provider(opts.ethereumProvider as ethers.providers.ExternalProvider)
   const signer = provider.getSigner()
+
+  // Wrap path: MON↔WMON directly against the canonical wrapper (1:1, always executable).
+  if (quote.kind === 'wrap') {
+    const wmon = new ethers.Contract(quote.market, WRAP_ABI, signer)
+    const callData = quote.side === 'wrap'
+      ? { to: quote.market, data: wmon.interface.encodeFunctionData('deposit'), value: ethers.BigNumber.from(quote.inputRaw.toString()), from: ownerAddress }
+      : { to: quote.market, data: wmon.interface.encodeFunctionData('withdraw', [quote.inputRaw.toString()]), value: ethers.BigNumber.from(0), from: ownerAddress }
+    opts.onStatus?.('simulating')
+    try {
+      await provider.call(callData)
+    } catch (e) {
+      const err = e as Error & { reason?: string }
+      throw new Error(`wrap rejected in simulation: ${err.reason || err.message}`)
+    }
+    opts.onStatus?.('swapping')
+    const tx = quote.side === 'wrap'
+      ? await wmon.deposit({ value: ethers.BigNumber.from(quote.inputRaw.toString()) })
+      : await wmon.withdraw(quote.inputRaw.toString())
+    const receipt = await tx.wait()
+    return { txHash: receipt.transactionHash as Hash, partialFill: false }
+  }
+
   const market = new ethers.Contract(quote.market, MARKET_ABI, signer)
   const inputIsNative = quote.from.address === ADDRESS_ZERO
   const fn = quote.side === 'sell' ? 'placeAndExecuteMarketSell' : 'placeAndExecuteMarketBuy'
@@ -245,7 +327,11 @@ export async function executeSwap(opts: {
     quote.minOutRaw.toString(),
     false,
     fok,
-    { value: inputIsNative ? ethers.BigNumber.from(quote.inputRaw.toString()) : 0 },
+    {
+      value: inputIsNative ? ethers.BigNumber.from(quote.inputRaw.toString()) : 0,
+      // explicit limit: skip estimator (see mintKuruUsdc note)
+      gasLimit: 1000000,
+    },
   )
   const receipt = await tx.wait()
   return { txHash: receipt.transactionHash as Hash, partialFill: !fok }

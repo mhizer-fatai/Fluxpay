@@ -16,7 +16,7 @@ import { EXPLORER_URL } from '@/lib/chain'
 
 type Step = 'form' | 'confirm' | 'sending' | 'success'
 
-const SENDABLE: TokenKey[] = ['USDC', 'AUSD', 'WMON', 'WETH', 'MON']
+const SENDABLE: TokenKey[] = ['USDC', 'KUSDC', 'AUSD', 'WMON', 'WETH', 'MON']
 
 function SlideToSend({ onComplete, disabled }: { onComplete: () => void; disabled?: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)

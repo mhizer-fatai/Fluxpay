@@ -28,7 +28,7 @@ export const SPLIT_MANAGER_ADDRESS = import.meta.env.VITE_SPLIT_MANAGER_ADDRESS 
 export const LINK_ESCROW_ADDRESS = import.meta.env.VITE_LINK_ESCROW_ADDRESS as Address
 export const STREAM_VAULT_ADDRESS = import.meta.env.VITE_STREAM_VAULT_ADDRESS as Address
 
-export type TokenKey = 'MON' | 'USDC' | 'AUSD' | 'WETH' | 'WMON'
+export type TokenKey = 'MON' | 'USDC' | 'AUSD' | 'WETH' | 'WMON' | 'KUSDC'
 
 export interface TokenInfo {
   key: TokenKey
@@ -45,6 +45,7 @@ export const TOKENS: TokenInfo[] = [
   { key: 'AUSD', symbol: 'AUSD', name: 'Aperture USD', decimals: 6, address: import.meta.env.VITE_AUSD_ADDRESS as Address, stable: true },
   { key: 'WETH', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, address: import.meta.env.VITE_WETH_ADDRESS as Address, stable: false },
   { key: 'WMON', symbol: 'WMON', name: 'Wrapped Monad', decimals: 18, address: import.meta.env.VITE_WMON_ADDRESS as Address, stable: false },
+  { key: 'KUSDC', symbol: 'kUSDC', name: 'Kuru Testnet USDC', decimals: 6, address: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', stable: true },
 ]
 
 export const tokenByKey = (key: TokenKey) => TOKENS.find(t => t.key === key)!
@@ -152,7 +153,7 @@ export const shortenAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.sl
 let priceCache: { at: number; prices: Record<TokenKey, number> } | null = null
 export async function getUsdPrices(): Promise<Record<TokenKey, number>> {
   if (priceCache && Date.now() - priceCache.at < 5 * 60 * 1000) return priceCache.prices
-  const prices: Record<TokenKey, number> = { MON: 0, USDC: 1, AUSD: 1, WETH: 0, WMON: 0 }
+  const prices: Record<TokenKey, number> = { MON: 0, USDC: 1, AUSD: 1, WETH: 0, WMON: 0, KUSDC: 1 }
   try {
     const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=monad,ethereum&vs_currencies=usd')
     if (res.ok) {
