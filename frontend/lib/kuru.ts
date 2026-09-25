@@ -7,7 +7,6 @@ import {
   parseAbiItem,
   type Address,
   type Hash,
-  type WalletClient,
 } from 'viem'
 import { monadTestnet } from './chain'
 
@@ -50,13 +49,13 @@ const DIRECT_MARKETS: DirectMarket[] = [
   { market: '0x0b4dd2a7b09d5c5401149ffe51301cc589017343', base: '0xee1dce135a9ab598bca8cf3a28bdef6892100740', quote: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', baseDec: 6, quoteDec: 6 },
 ]
 
-const marketAbi = [
+const MARKET_ABI = [
   parseAbiItem('function bestBidAsk() external view returns (uint256 bid, uint256 ask)'),
   parseAbiItem('function placeAndExecuteMarketBuy(uint96 _quoteAmount, uint256 _minAmountOut, bool _isMargin, bool _isFillOrKill) external payable returns (uint256)'),
   parseAbiItem('function placeAndExecuteMarketSell(uint96 _size, uint256 _minAmountOut, bool _isMargin, bool _isFillOrKill) external payable returns (uint256)'),
 ] as const
 
-const erc20ApproveAbi = [
+const ERC20_ABI = [
   parseAbiItem('function approve(address spender, uint256 amount) external returns (bool)'),
 ] as const
 
@@ -150,7 +149,7 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
   const { market, side } = found
   const [bid, ask] = (await publicClient.readContract({
     address: market.market,
-    abi: marketAbi,
+    abi: MARKET_ABI,
     functionName: 'bestBidAsk',
   })) as readonly [bigint, bigint]
   const { pricePrecision: P, sizePrecision: S } = await marketPrecisions(market.market)
@@ -177,94 +176,79 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
 }
 
 /**
- * Execute a quoted direct swap through the market contract.
+ * Execute a quoted direct swap through an ethers signer (built from the Privy
+ * EIP-1193 provider). NOTE: viem's eth_call/simulate path systematically reverts
+ * against testnet-rpc.monad.xyz's balancer while byte-identical ethers calls
+ * succeed, so execution deliberately avoids viem here.
  * ERC-20 inputs are approved first; native MON is sent as msg.value.
- * A simulation runs first — if it reverts, nothing is broadcast.
+ * A pre-check runs first — if it reverts, nothing is broadcast.
  */
 export async function executeSwap(opts: {
-  walletClient: WalletClient
+  ethereumProvider: unknown
   ownerAddress: Address
   quote: DirectQuote
   onStatus?: (status: 'approving' | 'simulating' | 'swapping') => void
 }): Promise<{ txHash: Hash; partialFill: boolean }> {
-  const { walletClient, ownerAddress, quote } = opts
+  const { ownerAddress, quote } = opts
+  const provider = new ethers.providers.Web3Provider(opts.ethereumProvider as ethers.providers.ExternalProvider)
+  const signer = provider.getSigner()
+  const market = new ethers.Contract(quote.market, MARKET_ABI, signer)
   const inputIsNative = quote.from.address === ADDRESS_ZERO
+  const fn = quote.side === 'sell' ? 'placeAndExecuteMarketSell' : 'placeAndExecuteMarketBuy'
 
   if (!inputIsNative) {
     opts.onStatus?.('approving')
-    const approveHash = await walletClient.writeContract({
-      account: ownerAddress,
-      chain: monadTestnet,
-      address: quote.from.address,
-      abi: erc20ApproveAbi,
-      functionName: 'approve',
-      args: [quote.market, quote.inputRaw],
-    })
-    await publicClient.waitForTransactionReceipt({ hash: approveHash })
+    const token = new ethers.Contract(quote.from.address, ERC20_ABI, signer)
+    const approveTx = await token.approve(quote.market, ethers.BigNumber.from(quote.inputRaw.toString()))
+    await approveTx.wait()
   }
 
-  const functionName = quote.side === 'sell' ? 'placeAndExecuteMarketSell' : 'placeAndExecuteMarketBuy'
+  const buildCall = (fok: boolean) => ({
+    to: quote.market,
+    data: market.interface.encodeFunctionData(fn, [quote.inputUnits.toString(), quote.minOutRaw.toString(), false, fok]),
+    value: inputIsNative ? ethers.BigNumber.from(quote.inputRaw.toString()) : ethers.BigNumber.from(0),
+    from: ownerAddress,
+  })
 
-  // Chain arg is in MARKET PRECISION units (_size = human × sizePrecision,
-  // _quoteAmount = human × pricePrecision); value/approve stay raw.
-
-  // The public testnet RPC load-balances across nodes that can be briefly out of
-  // sync, so a single simulation may falsely reject. Retry, then fall back to
-  // non-FOK (partial fills allowed, minOut still enforced on-chain).
+  // Pre-check with the same library that executes (ethers eth_call succeeds reliably).
+  opts.onStatus?.('simulating')
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
   let fok = true
-  let simulated = false
+  let ok = false
   let lastErr: unknown = null
-  opts.onStatus?.('simulating')
-  for (let attempt = 0; attempt < 3 && !simulated; attempt++) {
+  for (let attempt = 0; attempt < 3 && !ok; attempt++) {
     try {
-      await publicClient.simulateContract({
-        account: ownerAddress,
-        address: quote.market,
-        abi: marketAbi,
-        functionName,
-        args: [quote.inputUnits, quote.minOutRaw, false, true],
-        value: inputIsNative ? quote.inputRaw : 0n,
-      })
-      simulated = true
+      await provider.call(buildCall(true))
+      ok = true
     } catch (e) {
       lastErr = e
       await sleep(800)
     }
   }
-  if (!simulated) {
+  if (!ok) {
     try {
-      await publicClient.simulateContract({
-        account: ownerAddress,
-        address: quote.market,
-        abi: marketAbi,
-        functionName,
-        args: [quote.inputUnits, quote.minOutRaw, false, false],
-        value: inputIsNative ? quote.inputRaw : 0n,
-      })
-      simulated = true
+      await provider.call(buildCall(false))
+      ok = true
       fok = false
     } catch (e) {
       lastErr = e
     }
   }
-  if (!simulated) {
-    const err = lastErr as Error & { shortMessage?: string }
-    throw new Error(`market rejected the swap in simulation: ${err.shortMessage || err.message}`)
+  if (!ok) {
+    const err = lastErr as Error & { reason?: string }
+    throw new Error(`market rejected the swap in simulation: ${err.reason || err.message}`)
   }
 
   opts.onStatus?.('swapping')
-  const txHash = await walletClient.writeContract({
-    account: ownerAddress,
-    chain: monadTestnet,
-    address: quote.market,
-    abi: marketAbi,
-    functionName,
-    args: [quote.inputUnits, quote.minOutRaw, false, fok],
-    value: inputIsNative ? quote.inputRaw : 0n,
-  })
-  await publicClient.waitForTransactionReceipt({ hash: txHash })
-  return { txHash, partialFill: !fok }
+  const tx = await market[fn](
+    quote.inputUnits.toString(),
+    quote.minOutRaw.toString(),
+    false,
+    fok,
+    { value: inputIsNative ? ethers.BigNumber.from(quote.inputRaw.toString()) : 0 },
+  )
+  const receipt = await tx.wait()
+  return { txHash: receipt.transactionHash as Hash, partialFill: !fok }
 }
 
 export const formatQuoteAmount = (raw: bigint, decimals: number) =>

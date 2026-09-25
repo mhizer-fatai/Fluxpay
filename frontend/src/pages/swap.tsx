@@ -12,7 +12,7 @@ import { EXPLORER_URL } from '@/lib/chain'
 type Phase = 'idle' | 'quoting' | 'approving' | 'simulating' | 'swapping' | 'success' | 'error'
 
 export default function SwapPage() {
-  const { address, getWalletClient } = useWallet()
+  const { address, wallet } = useWallet()
   const [fromSym, setFromSym] = useState('MON')
   const [toSym, setToSym] = useState('USDC')
   const [amount, setAmount] = useState('')
@@ -69,10 +69,10 @@ export default function SwapPage() {
     if (!address) return setError('Wallet not ready — log in first.')
     if (!quote) return setError('No valid quote — adjust the amount.')
     try {
-      const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('wallet_unavailable')
+      if (!wallet) throw new Error('wallet_unavailable')
+      const ethereumProvider = await (wallet as unknown as { getEthereumProvider: () => Promise<unknown> }).getEthereumProvider()
       const { txHash: hash, partialFill } = await executeSwap({
-        walletClient,
+        ethereumProvider,
         ownerAddress: address as `0x${string}`,
         quote,
         onStatus: s => {
