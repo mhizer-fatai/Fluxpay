@@ -171,7 +171,7 @@ export async function executeSwap(opts: {
   ownerAddress: Address
   quote: DirectQuote
   onStatus?: (status: 'approving' | 'simulating' | 'swapping') => void
-}): Promise<{ txHash: Hash }> {
+}): Promise<{ txHash: Hash; partialFill: boolean }> {
   const { walletClient, ownerAddress, quote } = opts
   const inputIsNative = quote.from.address === ADDRESS_ZERO
 
@@ -189,20 +189,49 @@ export async function executeSwap(opts: {
   }
 
   const functionName = quote.side === 'sell' ? 'placeAndExecuteMarketSell' : 'placeAndExecuteMarketBuy'
-  const args = [quote.inputRaw, quote.minOutRaw, false, true] as const
 
+  // The public testnet RPC load-balances across nodes that can be briefly out of
+  // sync, so a single simulation may falsely reject. Retry, then fall back to
+  // non-FOK (partial fills allowed, minOut still enforced on-chain).
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+  let fok = true
+  let simulated = false
+  let lastErr: unknown = null
   opts.onStatus?.('simulating')
-  try {
-    await publicClient.simulateContract({
-      account: ownerAddress,
-      address: quote.market,
-      abi: marketAbi,
-      functionName,
-      args,
-      value: inputIsNative ? quote.inputRaw : 0n,
-    })
-  } catch (e) {
-    const err = e as Error & { shortMessage?: string }
+  for (let attempt = 0; attempt < 3 && !simulated; attempt++) {
+    try {
+      await publicClient.simulateContract({
+        account: ownerAddress,
+        address: quote.market,
+        abi: marketAbi,
+        functionName,
+        args: [quote.inputRaw, quote.minOutRaw, false, true],
+        value: inputIsNative ? quote.inputRaw : 0n,
+      })
+      simulated = true
+    } catch (e) {
+      lastErr = e
+      await sleep(800)
+    }
+  }
+  if (!simulated) {
+    try {
+      await publicClient.simulateContract({
+        account: ownerAddress,
+        address: quote.market,
+        abi: marketAbi,
+        functionName,
+        args: [quote.inputRaw, quote.minOutRaw, false, false],
+        value: inputIsNative ? quote.inputRaw : 0n,
+      })
+      simulated = true
+      fok = false
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  if (!simulated) {
+    const err = lastErr as Error & { shortMessage?: string }
     throw new Error(`market rejected the swap in simulation: ${err.shortMessage || err.message}`)
   }
 
@@ -213,11 +242,11 @@ export async function executeSwap(opts: {
     address: quote.market,
     abi: marketAbi,
     functionName,
-    args,
+    args: [quote.inputRaw, quote.minOutRaw, false, fok],
     value: inputIsNative ? quote.inputRaw : 0n,
   })
   await publicClient.waitForTransactionReceipt({ hash: txHash })
-  return { txHash }
+  return { txHash, partialFill: !fok }
 }
 
 export const formatQuoteAmount = (raw: bigint, decimals: number) =>

@@ -71,7 +71,7 @@ export default function SwapPage() {
     try {
       const walletClient = await getWalletClient()
       if (!walletClient) throw new Error('wallet_unavailable')
-      const { txHash: hash } = await executeSwap({
+      const { txHash: hash, partialFill } = await executeSwap({
         walletClient,
         ownerAddress: address as `0x${string}`,
         quote,
@@ -83,8 +83,7 @@ export default function SwapPage() {
         },
       })
       setTxHash(hash)
-      setPhase('success')
-      setStatusMsg('')
+      setStatusMsg(partialFill ? 'Filled partially — thin book, min-out enforced.' : '')
       quoteFor.current = ''
     } catch (e) {
       const err = e as Error & { shortMessage?: string }
