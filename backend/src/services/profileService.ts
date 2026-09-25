@@ -1,7 +1,6 @@
 import { AppError, notFound } from "../lib/errors.js";
 import { profileRepo, type ProfileRow } from "../repositories/profileRepo.js";
-import { usernameHash, verifyRegistrationTx } from "../chain.js";
-import type { Hex } from "viem";
+import { usernameHash } from "../chain.js";
 
 /** API-facing shape (transformation layer: row → DTO, snake → camel). */
 export interface ProfileDto {
@@ -38,37 +37,28 @@ export const profileService = {
   },
 
   /**
-   * Claim flow: verify the mined registration tx binds `address` on-chain, record the
-   * username in the registry cache, then persist the profile with username.
-   * Authorization: the on-chain event owner must equal the claimed address.
+   * Claim flow (DB-owned usernames): first-come-first-served in the usernames table.
+   * Authorization: caller is authenticated; the address binds to the Privy user id.
    */
-  async claimUsername(input: {
+  async claimUsernameInDb(input: {
     address: string;
     username: string;
-    txHash: string;
     fullName: string;
     email?: string;
     privyUserId: string;
   }): Promise<ProfileDto> {
-    const verified = await verifyRegistrationTx(input.txHash as Hex, input.address);
-    if (!verified) {
-      throw new AppError("registration tx could not be verified on-chain", 400, "registration_not_verified");
-    }
-    if (verified.username !== input.username) {
-      throw new AppError("registered username does not match request", 409, "username_mismatch", {
-        expected: verified.username,
-      });
-    }
-    const hash = usernameHash(verified.username);
-    await profileRepo.upsertUsernameCache(verified.username, hash, input.address);
-    const row = await profileRepo.claimUsername({
+    const username = input.username.toLowerCase();
+    const row = await profileRepo.claimUsernameDb({
       address: input.address,
-      username: verified.username,
-      usernameHash: hash,
+      username,
       fullName: input.fullName,
       email: input.email ?? null,
       privyUserId: input.privyUserId,
+      usernameHash: usernameHash(username),
     });
+    if (!row) {
+      throw new AppError("username is already taken", 409, "username_taken");
+    }
     return toProfileDto(row);
   },
 };

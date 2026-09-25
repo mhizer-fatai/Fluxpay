@@ -1,8 +1,7 @@
 import { query } from "../db/pool.js";
-import { resolveUsernameOnChain } from "../chain.js";
 
 export const registryService = {
-  /** Cached lookup; callers must re-verify on-chain before embedding into userOp calldata. */
+  /** DB lookup (usernames are app data owned by Fluxpay). */
   async resolveCached(username: string): Promise<string | null> {
     const rows = await query<{ address: string }>(
       `SELECT address FROM usernames WHERE username = $1 AND address IS NOT NULL`,
@@ -11,9 +10,12 @@ export const registryService = {
     return rows[0]?.address ?? null;
   },
 
-  /** Chain is the source of truth for availability. */
+  /** Availability from the DB — fast, no chain dependency. */
   async isAvailable(username: string): Promise<boolean> {
-    const owner = await resolveUsernameOnChain(username.toLowerCase());
-    return owner === null;
+    const rows = await query<{ one: number }>(
+      `SELECT 1 AS one FROM usernames WHERE username = $1 LIMIT 1`,
+      [username.toLowerCase()],
+    );
+    return rows.length === 0;
   },
 };

@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { config } from "./config.js";
 import { startWsGateway } from "./ws/gateway.js";
 import { requestContextMiddleware } from "./middleware/requestContext.js";
+import { corsMiddleware } from "./middleware/cors.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import { registryRouter } from "./routes/registry.js";
 import { meRouter } from "./routes/me.js";
@@ -14,6 +15,7 @@ export function createApp(): express.Express {
   app.disable("x-powered-by");
   app.use(express.json({ limit: "100kb" }));
 
+  app.use(corsMiddleware);
   app.use(requestContextMiddleware);
 
   app.get("/health", (_req, res) => {

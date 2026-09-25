@@ -58,12 +58,15 @@ profileRouter.put(
 const claimSchema = z.object({
   address: addressSchema,
   username: usernameSchema,
-  txHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
   fullName: z.string().min(1).max(120),
   email: z.string().email().max(200).optional(),
 });
 
-/** POST /api/v1/profile/claim-username */
+/**
+ * POST /api/v1/profile/claim-username
+ * Body: { address, username, fullName, email? }
+ * DB-first claim: usernames are app data (first-come-first-served), no on-chain tx required.
+ */
 profileRouter.post(
   "/claim-username",
   requireAuth,
@@ -73,10 +76,9 @@ profileRouter.post(
     try {
       const body = req.body as z.infer<typeof claimSchema>;
       res.json(
-        await profileService.claimUsername({
+        await profileService.claimUsernameInDb({
           address: body.address.toLowerCase(),
           username: body.username,
-          txHash: body.txHash,
           fullName: body.fullName,
           email: body.email,
           privyUserId: req.auth!.userId,

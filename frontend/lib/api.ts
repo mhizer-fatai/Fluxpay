@@ -40,7 +40,7 @@ export const fetchProfile = (address: string) => api<Profile>(`/api/v1/profile?a
 export const saveProfile = (body: { address: string; fullName: string; email?: string }) =>
   api<Profile>('/api/v1/profile', { method: 'PUT', body: JSON.stringify(body) })
 
-export const claimUsername = (body: { address: string; username: string; txHash: string; fullName: string; email?: string }) =>
+export const claimUsername = (body: { address: string; username: string; fullName: string; email?: string }) =>
   api<Profile>('/api/v1/profile/claim-username', { method: 'POST', body: JSON.stringify(body) })
 
 export const checkUsername = (username: string) =>

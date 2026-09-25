@@ -9,7 +9,7 @@ interface ProfileCtx {
   profile: Profile | null
   address: string | null
   refresh: () => Promise<void>
-  completeOnboarding: (args: { username: string; txHash: string; fullName: string; email?: string }) => Promise<Profile>
+  completeOnboarding: (args: { username: string; fullName: string; email?: string }) => Promise<Profile>
 }
 
 const Ctx = createContext<ProfileCtx | null>(null)
@@ -72,7 +72,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   }, [ready, authenticated, address, refresh])
 
   const completeOnboarding = useCallback(
-    async (args: { username: string; txHash: string; fullName: string; email?: string }) => {
+    async (args: { username: string; fullName: string; email?: string }) => {
       if (!address) throw new Error('wallet_not_ready')
       const p = await claimUsername({ ...args, address })
       setProfile(p)

@@ -3,23 +3,20 @@ import { useNavigate } from 'react-router-dom'
 import { useWallet } from '@/hooks/useWallet'
 import { useProfile } from '@/hooks/profile'
 import { checkUsername } from '@/lib/api'
-import { REGISTRY_ADDRESS, USERNAME_HASH, EXPLORER_URL, monadTestnet, publicClient, registryAbi } from '@/lib/chain'
-import type { Hash } from 'viem'
 
 const USERNAME_RE = /^[a-z0-9_]{3,32}$/
 
-type Phase = 'form' | 'sending' | 'mining' | 'saving' | 'done' | 'error'
+type Phase = 'form' | 'saving' | 'done'
 
 export default function OnboardingPage() {
   const navigate = useNavigate()
-  const { ready, authenticated, address, getWalletClient } = useWallet()
+  const { ready, authenticated, address } = useWallet()
   const { completeOnboarding, profile, status } = useProfile()
 
   const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
-  const [avail, setAvail] = useState<'idle' | 'checking' | 'free' | 'taken' | 'invalid'>('idle')
+  const [avail, setAvail] = useState<'idle' | 'checking' | 'free' | 'taken' | 'invalid' | 'error'>('idle')
   const [phase, setPhase] = useState<Phase>('form')
-  const [txHash, setTxHash] = useState<Hash | null>(null)
   const [error, setError] = useState('')
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -43,7 +40,7 @@ export default function OnboardingPage() {
         const r = await checkUsername(u)
         setAvail(r.available ? 'free' : 'taken')
       } catch {
-        setAvail('invalid')
+        setAvail('error')
       }
     }, 400)
     return () => { if (debounce.current) clearTimeout(debounce.current) }
@@ -55,39 +52,24 @@ export default function OnboardingPage() {
     if (avail !== 'free') return setError('Pick a valid, available username')
     if (!address) return setError('Wallet not ready yet — try again in a moment')
     try {
-      const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('wallet_unavailable')
-      setPhase('sending')
-      const u = username.trim().toLowerCase()
-      const hash = await walletClient.writeContract({
-        account: address as `0x${string}`,
-        chain: monadTestnet,
-        address: REGISTRY_ADDRESS,
-        abi: registryAbi,
-        functionName: 'register',
-        args: [USERNAME_HASH(u), u],
-      })
-      setTxHash(hash)
-      setPhase('mining')
-      const receipt = await publicClient.waitForTransactionReceipt({ hash })
-      if (receipt.status !== 'success') throw new Error('tx_reverted')
       setPhase('saving')
-      await completeOnboarding({ username: u, txHash: hash, fullName: fullName.trim() })
+      const u = username.trim().toLowerCase()
+      await completeOnboarding({ username: u, fullName: fullName.trim() })
       setPhase('done')
       navigate('/dashboard', { replace: true })
     } catch (err) {
       setPhase('form')
-      const e = err as Error & { shortMessage?: string; details?: string }
-      const msg = e.shortMessage || e.details || e.message || 'Something went wrong'
-      setError(
-        /insufficient funds/i.test(msg)
-          ? 'Your wallet has no gas. Get testnet MON from the faucet (faucet.monad.xyz) and try again.'
-          : msg,
-      )
+      const e = err as Error & { status?: number }
+      if (e.status === 409) {
+        setAvail('taken')
+        setError(`@${username} was just taken — pick another`)
+      } else {
+        setError(e.message || 'Could not save your account — try again')
+      }
     }
   }
 
-  const busy = phase === 'sending' || phase === 'mining' || phase === 'saving'
+  const busy = phase === 'saving'
 
   return (
     <main className="auth-page">
@@ -110,7 +92,7 @@ export default function OnboardingPage() {
             <span style={{ color: 'var(--muted, #999)' }}>@</span>
             <input
               value={username}
-              onChange={e => setUsername(e.target.value.toLowerCase())}
+              onChange={e => setUsername(e.target.value.toLowerCase().replace(/^@+/, ''))}
               placeholder="ada"
               autoComplete="off"
               spellCheck={false}
@@ -120,6 +102,7 @@ export default function OnboardingPage() {
           </div>
           <p style={{ minHeight: 18, margin: '6px 0 14px', fontSize: 12 }}>
             {avail === 'checking' && 'Checking availability…'}
+            {avail === 'error' && <span style={{ color: '#f59e0b' }}>Availability check failed — try again in a moment.</span>}
             {avail === 'free' && <span style={{ color: '#22c55e' }}>@{username} is available</span>}
             {avail === 'taken' && <span style={{ color: '#ef4444' }}>@{username} is already taken</span>}
             {avail === 'invalid' && username && <span style={{ color: '#ef4444' }}>3–32 chars: a-z, 0-9, _</span>}
@@ -133,19 +116,11 @@ export default function OnboardingPage() {
           {error && <p style={{ color: '#ef4444', fontSize: 13, margin: '0 0 12px' }}>{error}</p>}
 
           <button className="auth-submit" disabled={busy || avail !== 'free' || !fullName.trim()} onClick={submit}>
-            {phase === 'sending' && 'Confirm in wallet…'}
-            {phase === 'mining' && 'Registering on-chain…'}
-            {phase === 'saving' && 'Saving profile…'}
-            {!busy && 'Create account'}
+            {busy ? 'Saving…' : 'Create account'}
           </button>
-          {busy && <p style={{ fontSize: 12, marginTop: 10 }}>Registering @{username} on Monad testnet — this costs a little gas.</p>}
-          {txHash && (
-            <p style={{ fontSize: 11, marginTop: 8, wordBreak: 'break-all' }}>
-              tx: <a href={`${EXPLORER_URL}/tx/${txHash}`} target="_blank" rel="noreferrer">{txHash}</a>
-            </p>
-          )}
+          {busy && <p style={{ fontSize: 12, marginTop: 10 }}>Reserving @{username}…</p>}
           <p style={{ fontSize: 11, marginTop: 14, color: 'var(--muted, #999)' }}>
-            Username is registered on-chain (Monad testnet) and owned by your wallet.
+            Usernames are first-come, first-served — no gas needed.
           </p>
         </div>
       </div>
