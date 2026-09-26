@@ -77,13 +77,24 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }, [currentIndex, pathname])
 
   // Live event push from the backend chain watcher (Redis → WS fan-out).
+  // Retries with backoff: the backend restarts on deploys and Redis may be down.
   useEffect(() => {
     if (!address) return
     const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/^http/, 'ws')
+    const target = `${wsUrl}/ws/activity?address=${address.toLowerCase()}`
     let socket: WebSocket | null = null
     let closed = false
-    try {
-      socket = new WebSocket(`${wsUrl}/ws/activity?address=${address.toLowerCase()}`)
+    let attempts = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+    const connect = () => {
+      if (closed) return
+      try {
+        socket = new WebSocket(target)
+      } catch {
+        scheduleRetry()
+        return
+      }
       socket.onmessage = ev => {
         try {
           const msg = JSON.parse(ev.data as string) as { type?: string; txHash?: string; amount?: number; tokenLabel?: string; from?: string; to?: string; username?: string }
@@ -101,9 +112,21 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           setNotifications(prev => (prev.some(n => n.id === id) ? prev : [item, ...prev].slice(0, 12)))
         } catch { /* ignore malformed frames */ }
       }
-      socket.onclose = () => { if (!closed) setTimeout(() => { /* browser reconnect handled on next mount */ }, 1000) }
-    } catch { /* ws unavailable */ }
-    return () => { closed = true; socket?.close() }
+      socket.onopen = () => { attempts = 0 }
+      socket.onclose = () => scheduleRetry()
+      socket.onerror = () => { try { socket?.close() } catch { /* noop */ } }
+    }
+    const scheduleRetry = () => {
+      if (closed || attempts >= 5) return
+      attempts += 1
+      retryTimer = setTimeout(connect, Math.min(2000 * attempts, 10000))
+    }
+    connect()
+    return () => {
+      closed = true
+      if (retryTimer) clearTimeout(retryTimer)
+      try { socket?.close() } catch { /* noop */ }
+    }
   }, [address])
 
   const openNotifications = (e: React.MouseEvent) => {

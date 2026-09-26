@@ -35,12 +35,16 @@ const rpcRelease = () => {
 }
 const rpcFetch: typeof fetch = (async (input: any, init?: any) => {
   await rpcAcquire()
+  let res: Response
   try {
-    const res = await fetch(input, init)
-    if (res.status !== 429) return res
+    res = await fetch(input, init)
   } catch (e) {
     rpcRelease()
     throw e
+  }
+  if (res.status !== 429) {
+    rpcRelease()
+    return res
   }
   // 429: back off once, then retry through the gate
   rpcRelease()
