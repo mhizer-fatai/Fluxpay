@@ -28,7 +28,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!address) return
     void listStreams(address).then(setStreams).catch(() => setStreams([]))
-    void fetchActivity(address, 10_000).then(items => setActivity(items.slice(0, 6))).catch(() => setActivity([]))
+    void fetchActivity(address).then(items => setActivity(items.slice(0, 6))).catch(() => setActivity([]))
   }, [address])
 
   const hour = new Date().getHours()

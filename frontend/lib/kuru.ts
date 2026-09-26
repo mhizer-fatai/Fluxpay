@@ -95,7 +95,7 @@ export async function mintKuruUsdc(ethereumProvider: unknown, to: Address, amoun
   const provider = new ethers.providers.Web3Provider(ethereumProvider as ethers.providers.ExternalProvider)
   const signer = provider.getSigner()
   const token = new ethers.Contract(KURU_USDC, ['function mint(address to, uint256 amount)'], signer)
-  const tx = await token.mint(to, ethers.utils.parseUnits(String(amountHuman), 6), { gasLimit: 150000 })
+  const tx = await token.mint(to, ethers.utils.parseUnits(String(amountHuman), 6), { gasLimit: 500000 })
   const receipt = await tx.wait()
   return receipt.transactionHash as Hash
 }

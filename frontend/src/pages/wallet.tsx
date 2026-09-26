@@ -21,10 +21,12 @@ export default function WalletPage() {
   useEffect(() => {
     if (!address) return
     setActivityLoading(true)
-    fetchActivity(address, 10_000)
+    const held = rows.filter(r => r.amount > 0).map(r => r.key)
+    fetchActivity(address, 1800, held.length > 0 ? { tokenKeys: held } : undefined)
       .then(items => setActivity(items.slice(0, 5)))
       .catch(() => setActivity([]))
       .finally(() => setActivityLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address])
 
   const copyAddress = () => {

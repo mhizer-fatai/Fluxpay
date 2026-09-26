@@ -19,6 +19,7 @@ export default function ActivityPage() {
   const [visible, setVisible] = useState(PAGE_SIZE)
   const [search, setSearch] = useState('')
   const [kind, setKind] = useState<Kind>('All')
+  const [category, setCategory] = useState('All categories')
   const [dateFilter, setDateFilter] = useState('All time')
   const [assetFilter, setAssetFilter] = useState('All assets')
   const [detail, setDetail] = useState<ActivityItem | null>(null)
@@ -28,7 +29,7 @@ export default function ActivityPage() {
     if (!address) return
     setLoading(true)
     setError('')
-    fetchActivity(address, 40_000)
+    fetchActivity(address)
       .then(setItems)
       .catch(e => setError((e as Error).message || 'Failed to load activity'))
       .finally(() => setLoading(false))
@@ -45,6 +46,7 @@ export default function ActivityPage() {
   const filtered = useMemo(() => items.filter(i => {
     if (kind === 'Sent' && i.kind !== 'sent') return false
     if (kind === 'Received' && i.kind !== 'received') return false
+    if (category !== 'All categories' && i.category !== category) return false
     if (assetFilter !== 'All assets' && i.token !== assetFilter) return false
     if (dateFilter !== 'All time') {
       const ageDays = (Date.now() / 1000 - i.ts) / 86400
@@ -54,10 +56,10 @@ export default function ActivityPage() {
     }
     if (search) {
       const q = search.toLowerCase()
-      if (!`${i.hash} ${i.token ?? ''} ${i.counterparty} ${i.event}`.toLowerCase().includes(q)) return false
+      if (!`${i.hash} ${i.token ?? ''} ${i.counterparty} ${i.event} ${i.category}`.toLowerCase().includes(q)) return false
     }
     return true
-  }), [items, kind, assetFilter, dateFilter, search])
+  }), [items, kind, category, assetFilter, dateFilter, search])
 
   const usdOf = (i: ActivityItem) => (prices.current && i.token ? i.amount * (prices.current[i.token] ?? 0) : 0)
   const totals = useMemo(() => {
@@ -71,9 +73,9 @@ export default function ActivityPage() {
   }, [filtered]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const exportCsv = () => {
-    const header = 'date,type,token,amount,counterparty,tx\n'
+    const header = 'date,category,type,token,amount,counterparty,tx\n'
     const body = filtered
-      .map(i => `${new Date(i.ts * 1000).toISOString()},${i.event},${i.token ?? ''},${i.amount},${i.counterparty},${i.hash}`)
+      .map(i => `${new Date(i.ts * 1000).toISOString()},${i.category},${i.event},${i.token ?? ''},${i.amount},${i.counterparty},${i.hash}`)
       .join('\n')
     const blob = new Blob([header + body], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -84,7 +86,13 @@ export default function ActivityPage() {
     URL.revokeObjectURL(url)
   }
 
-  const TypeIcon: Record<string, LucideIcon> = { PaymentSettled: ArrowUpRight, Transfer: ArrowDownLeft }
+  const TypeIcon: Record<string, LucideIcon> = {
+    PaymentSettled: ArrowUpRight, BatchSettled: ArrowUpRight, Transfer: ArrowDownLeft,
+    StreamOpened: ArrowUpRight, StreamWithdrawn: ArrowDownLeft, StreamTopUp: ArrowUpRight,
+    StreamCancelled: ArrowUpRight, StreamPaused: ArrowUpRight, StreamResumed: ArrowUpRight,
+    LinkCreated: ArrowUpRight, LinkClaimed: ArrowDownLeft, LinkRefunded: ArrowDownLeft,
+    Wrap: ArrowUpRight, Unwrap: ArrowDownLeft, UsernameRegistered: ArrowUpRight,
+  }
 
   return <DashboardShell>
     <section className="dashboard-content ac">
@@ -115,6 +123,9 @@ export default function ActivityPage() {
             {(['All', 'Sent', 'Received'] as Kind[]).map(c => <button key={c} className={c === kind ? 'on' : ''} onClick={() => { setKind(c); setVisible(PAGE_SIZE) }}>{c}</button>)}
           </div>
           <div className="ac-selects">
+            <select value={category} onChange={e => { setCategory(e.target.value); setVisible(PAGE_SIZE) }} aria-label="Category">
+              {['All categories', 'Payment', 'Transfer', 'Stream', 'Payment Link', 'Swap', 'Account'].map(o => <option key={o}>{o}</option>)}
+            </select>
             <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} aria-label="Date">
               {['All time', 'Today', 'This week', 'This month'].map(o => <option key={o}>{o}</option>)}
             </select>
@@ -133,7 +144,7 @@ export default function ActivityPage() {
             return (
               <button className="ac-tr ac-row" key={`${t.hash}-${idx}`} onClick={() => setDetail(t)}>
                 <span>{timeAgo(t.ts)}</span>
-                <span className="ac-type"><span className="ac-type-icon"><Icon size={14} /></span>{t.event === 'PaymentSettled' ? 'Payment' : 'Transfer'}</span>
+                <span className="ac-type"><span className="ac-type-icon"><Icon size={14} /></span>{t.category}</span>
                 <span>{shortAddr(t.counterparty)}</span>
                 <span className={`ac-amount ${t.kind === 'received' ? 'up' : ''}`}>{t.kind === 'received' ? '+' : '−'}{t.amount.toLocaleString('en-US', { maximumFractionDigits: 6 })} {t.token ?? ''}</span>
                 <span className="ac-status completed">Confirmed</span>
@@ -154,7 +165,7 @@ export default function ActivityPage() {
       <div className="ac-modal-backdrop" onClick={() => setDetail(null)}>
         <div className="ac-modal" onClick={e => e.stopPropagation()}>
           <div className="ac-modal-head">
-            <h2>{detail.event === 'PaymentSettled' ? 'FluxPay Payment' : 'Token Transfer'}</h2>
+            <h2>{detail.category}</h2>
             <button className="ac-close" onClick={() => setDetail(null)} aria-label="Close"><X size={16} /></button>
           </div>
           <p className="ac-detail-sub">{detail.kind === 'received' ? 'Received' : 'Sent'} on Monad Testnet</p>
