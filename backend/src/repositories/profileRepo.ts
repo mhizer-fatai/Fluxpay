@@ -17,11 +17,6 @@ export interface UpsertProfileInput {
   privyUserId: string;
 }
 
-export interface ClaimUsernameInput extends UpsertProfileInput {
-  username: string;
-  usernameHash: string;
-}
-
 const COLUMNS = `address, username, full_name, email, privy_user_id, created_at, updated_at`;
 
 export const profileRepo = {
@@ -39,6 +34,42 @@ export const profileRepo = {
   },
 
   /**
+   * Ownership rule (authorization): an address binds to the first Privy user that
+   * writes it. Later writes from a different user are rejected with { conflict: true }.
+   * Rows with NULL privy_user_id (legacy) are adopted by the first writer.
+   */
+  async upsertBaseGuarded(input: UpsertProfileInput): Promise<{ row: ProfileRow } | { conflict: true }> {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const existing = await client.query<ProfileRow>(
+        `SELECT ${COLUMNS} FROM profiles WHERE address = $1 FOR UPDATE`,
+        [input.address],
+      );
+      const row = existing.rows[0];
+      if (row && row.privy_user_id && row.privy_user_id !== input.privyUserId) {
+        await client.query("ROLLBACK");
+        return { conflict: true };
+      }
+      const upserted = await client.query<ProfileRow>(
+        `INSERT INTO profiles (address, full_name, email, privy_user_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (address) DO UPDATE
+           SET full_name = $2, email = $3, privy_user_id = $4, updated_at = now()
+         RETURNING ${COLUMNS}`,
+        [input.address, input.fullName, input.email, input.privyUserId],
+      );
+      await client.query("COMMIT");
+      return { row: upserted.rows[0]! };
+    } catch (err) {
+      try { await client.query("ROLLBACK"); } catch { /* already rolled back */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
+  /**
    * DB-first username claim (product decision: usernames are app data owned by Fluxpay).
    * Atomically inserts the username and upserts the profile; unique violation → null (taken).
    */
@@ -49,10 +80,19 @@ export const profileRepo = {
     email: string | null;
     privyUserId: string;
     usernameHash: string;
-  }): Promise<ProfileRow | null> {
+  }): Promise<ProfileRow | null | { conflict: true }> {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      const existing = await client.query<ProfileRow>(
+        `SELECT ${COLUMNS} FROM profiles WHERE address = $1 FOR UPDATE`,
+        [input.address],
+      );
+      const prior = existing.rows[0];
+      if (prior && prior.privy_user_id && prior.privy_user_id !== input.privyUserId) {
+        await client.query("ROLLBACK");
+        return { conflict: true };
+      }
       try {
         await client.query(
           `INSERT INTO usernames (username, username_hash, address, registered_at)
@@ -82,18 +122,6 @@ export const profileRepo = {
     }
   },
 
-  async upsertBase(input: UpsertProfileInput): Promise<ProfileRow> {
-    const rows = await query<ProfileRow>(
-      `INSERT INTO profiles (address, full_name, email, privy_user_id)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (address) DO UPDATE
-         SET full_name = $2, email = $3, privy_user_id = $4, updated_at = now()
-       RETURNING ${COLUMNS}`,
-      [input.address, input.fullName, input.email, input.privyUserId],
-    );
-    return rows[0]!;
-  },
-
   async upsertUsernameCache(username: string, usernameHash: string, address: string): Promise<void> {
     await query(
       `INSERT INTO usernames (username, username_hash, address)
@@ -101,17 +129,5 @@ export const profileRepo = {
        ON CONFLICT (username) DO UPDATE SET address = $3`,
       [username, usernameHash, address],
     );
-  },
-
-  async claimUsername(input: ClaimUsernameInput): Promise<ProfileRow> {
-    const rows = await query<ProfileRow>(
-      `INSERT INTO profiles (address, username, full_name, email, privy_user_id)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (address) DO UPDATE
-         SET username = $2, full_name = $3, email = $4, privy_user_id = $5, updated_at = now()
-       RETURNING ${COLUMNS}`,
-      [input.address, input.username, input.fullName, input.email, input.privyUserId],
-    );
-    return rows[0]!;
   },
 };
