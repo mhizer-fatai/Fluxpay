@@ -13,9 +13,49 @@ export const monadTestnet: Chain = defineChain({
 
 export const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 10143)
 
+// Transport-level guardrails: the public testnet RPC rate-limits aggressively (429s).
+// One gate for ALL viem reads — max 6 concurrent, single retry with backoff on 429.
+const MAX_RPC_CONCURRENT = 6
+let rpcRunning = 0
+const rpcQueue: Array<() => void> = []
+const rpcAcquire = (): Promise<void> => {
+  if (rpcRunning < MAX_RPC_CONCURRENT) {
+    rpcRunning += 1
+    return Promise.resolve()
+  }
+  return new Promise(resolve => rpcQueue.push(resolve))
+}
+const rpcRelease = () => {
+  rpcRunning -= 1
+  const next = rpcQueue.shift()
+  if (next) {
+    rpcRunning += 1
+    next()
+  }
+}
+const rpcFetch: typeof fetch = (async (input: any, init?: any) => {
+  await rpcAcquire()
+  try {
+    const res = await fetch(input, init)
+    if (res.status !== 429) return res
+  } catch (e) {
+    rpcRelease()
+    throw e
+  }
+  // 429: back off once, then retry through the gate
+  rpcRelease()
+  await new Promise(r => setTimeout(r, 1500))
+  await rpcAcquire()
+  try {
+    return await fetch(input, init)
+  } finally {
+    rpcRelease()
+  }
+}) as typeof fetch
+
 export const publicClient = createPublicClient({
   chain: monadTestnet,
-  transport: http(),
+  transport: http(undefined, { fetchFn: rpcFetch }),
 })
 
 export const EXPLORER_URL = monadTestnet.blockExplorers?.default?.url ?? 'https://testnet.monadexplorer.com'

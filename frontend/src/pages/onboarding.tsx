@@ -71,6 +71,10 @@ export default function OnboardingPage() {
 
   const busy = phase === 'saving'
 
+  // Don't flash the form while profile status is still resolving (or if already onboarded —
+  // the redirect effect above will move to /dashboard).
+  if (status === 'loading' || status === 'onboarded') return null
+
   return (
     <main className="auth-page">
       <div className="auth-card" style={{ gridTemplateColumns: '1fr' }}>

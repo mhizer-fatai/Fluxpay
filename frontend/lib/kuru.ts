@@ -9,6 +9,7 @@ import {
   type Hash,
 } from 'viem'
 import { monadTestnet } from './chain'
+import { cachedRpc } from './rpc'
 
 export const KURU_ROUTER = '0x1f5A250c4A506DA4cE584173c6ed1890B1bf7187'
 export const KURU_API = (import.meta.env.VITE_KURU_API as string | undefined) ?? 'https://api.testnet.kuru.io'
@@ -207,11 +208,15 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
   if (!found) throw new Error(`no direct Kuru market for ${fromSymbol} → ${toSymbol} (all markets quote in USDC)`)
 
   const { market, side } = found
-  const [bid, ask] = (await publicClient.readContract({
-    address: market.market,
-    abi: MARKET_ABI,
-    functionName: 'bestBidAsk',
-  })) as readonly [bigint, bigint]
+  const [bid, ask] = await cachedRpc<readonly [bigint, bigint]>(
+    `book:${market.market.toLowerCase()}`,
+    15_000,
+    async () => (await publicClient.readContract({
+      address: market.market,
+      abi: MARKET_ABI,
+      functionName: 'bestBidAsk',
+    })) as readonly [bigint, bigint],
+  )
   const { pricePrecision: P, sizePrecision: S } = await marketPrecisions(market.market)
 
   if (side === 'sell') {

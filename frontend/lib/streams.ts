@@ -1,5 +1,6 @@
 import { formatUnits, getContract, type Address } from 'viem'
 import { STREAM_VAULT_ADDRESS, publicClient, streamVaultAbi, tokenByAddress } from '@/lib/chain'
+import { bustRpcCache, cachedRpc } from '@/lib/rpc'
 
 export interface StreamRow {
   id: bigint
@@ -22,9 +23,11 @@ export interface StreamRow {
 
 const SECONDS_PER_MONTH = 2_592_000
 
-/** Lists StreamVault streams where `address` is the owner or recipient. */
-export async function listStreams(address: string, maxScan = 50): Promise<StreamRow[]> {
+/** Lists StreamVault streams where `address` is the owner or recipient (cached 30s). */
+export async function listStreams(address: string, maxScan = 20, opts?: { force?: boolean }): Promise<StreamRow[]> {
   const addr = address.toLowerCase()
+  if (opts?.force) bustRpcCache(`streams:${addr}`)
+  return cachedRpc<StreamRow[]>(`streams:${addr}:${maxScan}`, 30_000, async () => {
   const vault = getContract({ address: STREAM_VAULT_ADDRESS, abi: streamVaultAbi, client: publicClient })
   const nextId = (await vault.read.nextStreamId()) as bigint
   if (nextId === 0n) return []
@@ -67,4 +70,5 @@ export async function listStreams(address: string, maxScan = 50): Promise<Stream
     }),
   )
   return rows.filter((r): r is StreamRow => r !== null).reverse()
+  })
 }

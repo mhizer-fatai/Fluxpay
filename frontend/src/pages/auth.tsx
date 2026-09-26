@@ -32,6 +32,9 @@ export default function AuthPage() {
   const prev = () => setIndex(i => (i - 1 + reviews.length) % reviews.length)
   const next = () => setIndex(i => (i + 1) % reviews.length)
 
+  // Logged in: don't flash the login form while the post-login destination resolves.
+  if (ready && authenticated) return null
+
   return <main className="auth-page">
     <div className="auth-card">
       <div className="auth-visual">
