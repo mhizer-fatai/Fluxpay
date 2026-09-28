@@ -15,7 +15,7 @@ interface ProfileCtx {
 const Ctx = createContext<ProfileCtx | null>(null)
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
-  const { ready, authenticated, address, getAccessToken } = useWallet()
+  const { ready, authenticated, address, smartAddress, getAccessToken } = useWallet()
   const [status, setStatus] = useState<ProfileStatus>('loading')
   const [profile, setProfile] = useState<Profile | null>(null)
 
@@ -23,6 +23,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     setTokenProvider(getAccessToken)
   }, [getAccessToken])
 
+  // Identity lives on the EOA row; money routes to the smart account row when present.
   const refresh = useCallback(async () => {
     if (!authenticated) {
       setStatus('anonymous')
@@ -36,7 +37,16 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     }
     setStatus('loading')
     try {
-      const p = await fetchProfile(address)
+      // Prefer the smart-account profile (new claims bind there); fall back to the EOA row.
+      let p: Profile | null = null
+      if (smartAddress) {
+        try {
+          p = await fetchProfile(smartAddress)
+        } catch (err) {
+          if ((err as { status?: number }).status !== 404) throw err
+        }
+      }
+      p ??= await fetchProfile(address)
       setProfile(p)
       setStatus('onboarded')
     } catch (err) {
@@ -50,7 +60,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         setStatus('needs_onboarding')
       }
     }
-  }, [authenticated, address])
+  }, [authenticated, address, smartAddress])
 
   useEffect(() => {
     if (!ready) return
@@ -73,13 +83,16 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
   const completeOnboarding = useCallback(
     async (args: { username: string; fullName: string; email?: string }) => {
-      if (!address) throw new Error('wallet_not_ready')
-      const p = await claimUsername({ ...args, address })
+      // Bind the username to the smart (money) account when known so payments
+      // resolve there; otherwise fall back to the EOA.
+      const bindAddress = smartAddress ?? address
+      if (!bindAddress) throw new Error('wallet_not_ready')
+      const p = await claimUsername({ ...args, address: bindAddress })
       setProfile(p)
       setStatus('onboarded')
       return p
     },
-    [address],
+    [address, smartAddress],
   )
 
   return <Ctx.Provider value={{ status, profile, address, refresh, completeOnboarding }}>{children}</Ctx.Provider>

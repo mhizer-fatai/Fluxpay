@@ -28,5 +28,26 @@ export function useWallet() {
     return createWalletClient({ chain: monadTestnet, transport: custom(provider as never) })
   }, [privyWallet])
 
-  return { ready, authenticated, address, wallet: privyWallet ?? null, getWalletClient, getAccessToken, logout, user }
+  // The smart account is the money account: all transactions are sponsored userOps
+  // from it (Pimlico paymaster, invisible to the user). Derived deterministically.
+  const [smartAddress, setSmartAddress] = useState<string | null>(null)
+  useEffect(() => {
+    if (!address) return
+    let alive = true
+    void (async () => {
+      try {
+        const wc = await getWalletClient()
+        if (!wc || !alive) return
+        const { getGaslessAddress } = await import('../lib/gasless')
+        const sa = await getGaslessAddress(address as `0x${string}`, wc)
+        if (alive) setSmartAddress(sa)
+      } catch { /* sponsored path unavailable for this session */ }
+    })()
+    return () => { alive = false }
+  }, [address, getWalletClient])
+
+  /** The account whose balances and activity the app shows: smart account once known, else EOA. */
+  const moneyAddress = smartAddress ?? address
+
+  return { ready, authenticated, address, smartAddress, moneyAddress, wallet: privyWallet ?? null, getWalletClient, getAccessToken, logout, user }
 }

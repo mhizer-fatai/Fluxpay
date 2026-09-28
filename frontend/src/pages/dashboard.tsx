@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { listStreams } from '@/lib/streams'
 import { fetchActivity } from '@/lib/activity'
@@ -19,7 +20,9 @@ const quickActions: Array<{ label: string; icon: LucideIcon; href: string; soon?
 ]
 
 export default function DashboardPage() {
-  const { profile, address } = useProfile()
+  const { profile, address: profileAddress } = useProfile()
+  const { moneyAddress } = useWallet()
+  const address = moneyAddress ?? profileAddress
   const { rows, totalUsd, loading } = useBalances(address)
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof fetchActivity>>>([])

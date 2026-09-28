@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Download, Search, X, type LucideIcon } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
 import { fetchActivity, type ActivityItem } from '@/lib/activity'
 import { getUsdPrices, TOKENS } from '@/lib/chain'
 import { money, shortAddr, timeAgo } from '@/lib/format'
@@ -12,7 +13,9 @@ const PAGE_SIZE = 10
 type Kind = 'All' | 'Sent' | 'Received'
 
 export default function ActivityPage() {
-  const { address } = useProfile()
+  const { address: profileAddress } = useProfile()
+  const { moneyAddress } = useWallet()
+  const address = moneyAddress ?? profileAddress
   const [items, setItems] = useState<ActivityItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')

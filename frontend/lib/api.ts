@@ -7,7 +7,10 @@ export function setTokenProvider(fn: () => Promise<string | null>) {
 }
 
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  const token = await tokenProvider()
+  let token: string | null = null
+  try {
+    token = await tokenProvider()
+  } catch { /* unauthenticated — public endpoints still work */ }
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
@@ -48,3 +51,26 @@ export const checkUsername = (username: string) =>
 
 export const resolveUsernameApi = (username: string) =>
   api<{ username: string; address: string }>(`/api/v1/registry/resolve?username=${encodeURIComponent(username)}`)
+
+export interface PaymentLinkDto {
+  id: string
+  creatorAddress: string
+  title: string
+  description: string
+  token: string
+  amount: string
+  status: 'pending' | 'paid' | 'expired'
+  txHash: string | null
+  createdAt: string
+}
+
+export const createPaymentLink = (body: { creatorAddress: string; title: string; description?: string; token: string; amountRaw: string }) =>
+  api<PaymentLinkDto>('/api/v1/payment-links', { method: 'POST', body: JSON.stringify(body) })
+
+export const fetchMyLinks = (address: string, limit = 50) =>
+  api<PaymentLinkDto[]>(`/api/v1/payment-links/mine?address=${address.toLowerCase()}&limit=${limit}`)
+
+export const fetchLink = (id: string) => api<PaymentLinkDto>(`/api/v1/payment-links/${encodeURIComponent(id)}`)
+
+export const recordLinkPaid = (id: string, body: { txHash: string; payerAddress: string }) =>
+  api<PaymentLinkDto>(`/api/v1/payment-links/${encodeURIComponent(id)}/paid`, { method: 'POST', body: JSON.stringify(body) })

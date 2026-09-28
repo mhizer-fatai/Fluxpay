@@ -3,10 +3,13 @@ import { Copy, Maximize2, Share2, X } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { QrCode } from '@/components/qr-code'
 import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
 import { shortAddr } from '@/lib/format'
 
 export default function ReceivePage() {
-  const { address, profile } = useProfile()
+  const { address: profileAddress, profile } = useProfile()
+  const { moneyAddress } = useWallet()
+  const address = moneyAddress ?? profileAddress
   const [copied, setCopied] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
 

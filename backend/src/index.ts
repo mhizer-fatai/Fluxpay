@@ -9,6 +9,7 @@ import { registryRouter } from "./routes/registry.js";
 import { meRouter } from "./routes/me.js";
 import { profileRouter } from "./routes/profile.js";
 import { activityRouter } from "./routes/activity.js";
+import { paymentLinkRouter } from "./routes/paymentLinks.js";
 import { startChainWatcher } from "./watcher.js";
 
 export function createApp(): express.Express {
@@ -27,6 +28,7 @@ export function createApp(): express.Express {
   app.use("/api/v1/me", meRouter);
   app.use("/api/v1/profile", profileRouter);
   app.use("/api/v1/activity", activityRouter);
+  app.use("/api/v1/payment-links", paymentLinkRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

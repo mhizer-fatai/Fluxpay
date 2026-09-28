@@ -50,9 +50,10 @@ export interface GaslessCall {
 }
 
 /**
- * Sponsored send: batches calls into ONE ERC-4337 userOp (approve + settle),
- * gas paid by the Pimlico paymaster policy tied to VITE_PIMLICO_API_KEY.
- * Requires the funding/policy to exist in the Pimlico dashboard.
+ * THE transaction path for the whole app: batches arbitrary calls into ONE ERC-4337
+ * userOp from the user's smart account, gas paid invisibly by the Pimlico paymaster
+ * policy tied to VITE_PIMLICO_API_KEY. There is no other send path — the user never
+ * sees gas, fees, or toggles. Requires the funding/policy in the Pimlico dashboard.
  */
 export async function sendGasless(opts: {
   walletClient: WalletClient

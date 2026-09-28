@@ -6,8 +6,7 @@ import { Dropdown } from '@/components/dropdown'
 import { useProfile } from '@/hooks/profile'
 import { useBalances } from '@/hooks/useBalances'
 import { useWallet } from '@/hooks/useWallet'
-import { sendFunds, estimateFeeMon } from '@/lib/transfers'
-import { buildSettleCalls, getGaslessAddress, hasPimlicoKey, sendGasless } from '@/lib/gasless'
+import { buildSettleCalls, sendGasless } from '@/lib/gasless'
 import { fetchActivity } from '@/lib/activity'
 import { getUsdPrices, TOKENS, type TokenKey } from '@/lib/chain'
 import { resolveUsernameApi } from '@/lib/api'
@@ -60,29 +59,25 @@ function SlideToSend({ onComplete, disabled }: { onComplete: () => void; disable
 
 export default function SendPage() {
   const { address } = useProfile()
-  const { getWalletClient } = useWallet()
+  const { smartAddress, getWalletClient } = useWallet()
   const { rows } = useBalances(address)
+  const { rows: smartRows, refresh: refreshSmart } = useBalances(smartAddress)
 
   const [step, setStep] = useState<Step>('form')
   const [assetSym, setAssetSym] = useState<TokenKey>('USDC')
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('')
-  const [feeMon, setFeeMon] = useState<number | null>(null)
   const [prices, setPrices] = useState<Record<string, number> | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [txHash, setTxHash] = useState<string | null>(null)
   const [resolvedTo, setResolvedTo] = useState<string | null>(null)
-  const [gasless, setGasless] = useState(() => hasPimlicoKey())
-  const [smartAddress, setSmartAddress] = useState<string | null>(null)
-  const [userOpHash, setUserOpHash] = useState<string | null>(null)
   const [copiedSmart, setCopiedSmart] = useState(false)
   const [recents, setRecents] = useState<Array<{ addr: string; last: string }>>([])
 
-  const { rows: smartRows, refresh: refreshSmart } = useBalances(smartAddress)
-
-  const spendAddress = gasless && smartAddress ? smartAddress : address
-  const spendRows = gasless && smartAddress ? smartRows : rows
+  // All sends go from the smart account (sponsored, invisible to the user).
+  const spendAddress = smartAddress ?? address
+  const spendRows = smartAddress ? smartRows : rows
 
   const asset = TOKENS.find(t => t.key === assetSym)!
   const balanceRow = spendRows.find(r => r.key === assetSym)
@@ -90,23 +85,6 @@ export default function SendPage() {
   const amt = parseFloat(amount) || 0
   const usd = prices ? amt * (prices[assetSym] ?? 0) : 0
   const canContinue = recipient.trim().length > 3 && amt > 0 && amt <= balance
-
-  // Derive the deterministic gasless smart-account address once the wallet is ready.
-  useEffect(() => {
-    if (!gasless || !address || smartAddress) return
-    let alive = true
-    void getWalletClient()
-      .then(async wc => {
-        if (!wc || !alive) return
-        try {
-          const sa = await getGaslessAddress(address as `0x${string}`, wc)
-          if (alive) setSmartAddress(sa)
-        } catch { /* gasless unavailable — falls back to EOA */ }
-      })
-      .catch(() => {})
-    return () => { alive = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gasless, address])
 
   useEffect(() => { void getUsdPrices().then(setPrices) }, [])
   useEffect(() => {
@@ -127,22 +105,10 @@ export default function SendPage() {
       .catch(() => setRecents([]))
   }, [address])
 
-  useEffect(() => {
-    if (gasless) { setFeeMon(null); return } // sponsored — no fee to estimate
-    if (!address || !canContinue) { setFeeMon(null); return }
-    let alive = true
-    const to = /^0x[a-fA-F0-9]{40}$/.test(recipient.trim()) ? (recipient.trim() as `0x${string}`) : null
-    if (!to) { setFeeMon(null); return }
-    void estimateFeeMon({ from: address as `0x${string}`, token: asset, amountHuman: amt, to })
-      .then(f => { if (alive) setFeeMon(f) })
-      .catch(() => { if (alive) setFeeMon(null) })
-    return () => { alive = false }
-  }, [address, recipient, amt, asset, canContinue, gasless])
-
   const paste = async () => {
     try { const text = await navigator.clipboard.readText(); if (text) setRecipient(text.trim()) } catch { /* ignore */ }
   }
-  const reset = () => { setStep('form'); setRecipient(''); setAmount(''); setTxHash(null); setResolvedTo(null); setUserOpHash(null); setError('') }
+  const reset = () => { setStep('form'); setRecipient(''); setAmount(''); setTxHash(null); setResolvedTo(null); setError('') }
 
   const resolveRecipient = async (): Promise<string | null> => {
     const v = recipient.trim()
@@ -166,57 +132,34 @@ export default function SendPage() {
       const walletClient = await getWalletClient()
       if (!walletClient) throw new Error('wallet_unavailable')
 
-      if (gasless) {
-        if (!spendAddress) throw new Error('gasless account not ready — toggle it off or wait a moment')
-        const calls = buildSettleCalls({ token: asset, amountHuman: amt, to: to as `0x${string}` })
-        const result = await sendGasless({
-          walletClient,
-          ownerAddress: address as `0x${string}`,
-          calls,
-          onStatus: s => setBusy(s === 'signing' ? 'Signing sponsored userOp…' : s === 'submitted' ? 'Bundler submitted — waiting…' : 'Confirming…'),
-        })
-        setUserOpHash(result.userOpHash)
-        setTxHash(result.txHash)
-        void refreshSmart()
-      } else {
-        const result = await sendFunds({
-          walletClient,
-          from: address as `0x${string}`,
-          token: asset,
-          amountHuman: amt,
-          to: to as `0x${string}`,
-          onStep: s => setBusy(s === 'approving' ? 'Approving token spend…' : 'Sending…'),
-        })
-        setTxHash(result.txHash)
-      }
+      if (!spendAddress) throw new Error('Account not ready — wait a moment and try again')
+      const calls = buildSettleCalls({ token: asset, amountHuman: amt, to: to as `0x${string}` })
+      const result = await sendGasless({
+        walletClient,
+        ownerAddress: address as `0x${string}`,
+        calls,
+        onStatus: s => setBusy(s === 'signing' ? 'Confirm in your wallet…' : s === 'submitted' ? 'Sending…' : 'Confirming…'),
+      })
+      setTxHash(result.txHash)
+      void refreshSmart()
       setBusy('')
       setStep('success')
     } catch (e) {
       const err = e as Error & { shortMessage?: string }
-      const msg = err.shortMessage || err.message || 'Send failed'
-      setError(
-        /sponsor|paymaster|policy/i.test(msg)
-          ? 'Sponsorship rejected — the Pimlico policy needs funding in the Pimlico dashboard. Toggle gasless off to pay gas yourself.'
-          : /insufficient funds/i.test(msg)
-            ? 'Not enough gas — get testnet MON from faucet.monad.xyz, or toggle gasless on.'
-            : msg,
-      )
+      setError(err.shortMessage || err.message || 'Send failed — please try again')
       setBusy('')
       setStep('confirm')
     }
   }
-
-  const total = feeMon != null ? amt + feeMon : amt
 
   const summary = useMemo(() => (
     <>
       <div className="sn-sum-row"><span>You&apos;re sending</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
       <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
       <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
-      <div className="sn-sum-row"><span>Network fee</span><strong>{gasless ? 'Sponsored (Pimlico)' : feeMon != null ? `~${feeMon.toFixed(5)} MON` : 'estimating…'}</strong></div>
-      <div className="sn-sum-row sn-sum-total"><span>Total</span><strong>{total.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol === 'MON' ? 'MON' : `${asset.symbol} + gas`}</strong></div>
+      <div className="sn-sum-row sn-sum-total"><span>Total</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
     </>
-  ), [amt, asset.symbol, resolvedTo, recipient, feeMon, total])
+  ), [amt, asset.symbol, resolvedTo, recipient])
 
   return <DashboardShell>
     <section className="dashboard-content sn">
@@ -231,25 +174,18 @@ export default function SendPage() {
             <div className="sn-field">
               <label>From</label>
               <div className="sn-static sn-wallet-static">
-                <div><strong>{gasless ? 'Gasless smart wallet' : 'FluxPay Wallet'}</strong><small>{spendAddress ?? 'connecting…'}</small></div>
+                <div><strong>FluxPay Wallet</strong><small>{spendAddress ?? 'connecting…'}</small></div>
                 <span className="sn-wallet-bal">{balance.toLocaleString('en-US', { maximumFractionDigits: 4 })} {asset.symbol}</span>
               </div>
-              <div className="sn-input-row sn-input-row-btns">
-                <button
-                  className={`sn-inline${gasless ? '' : ' is-soon'}`}
-                  onClick={() => setGasless(g => !g)}
-                  title={gasless ? 'Pay your own gas from your wallet' : 'Sponsor gas via Pimlico paymaster'}
-                >
-                  ⚡ {gasless ? 'Gasless: ON' : 'Gasless: OFF'}
-                </button>
-                {gasless && smartAddress && (
+              {smartAddress && (
+                <div className="sn-input-row sn-input-row-btns">
                   <button className="sn-inline" onClick={() => { navigator.clipboard?.writeText(smartAddress).catch(() => {}); setCopiedSmart(true); setTimeout(() => setCopiedSmart(false), 1500) }}>
-                    {copiedSmart ? 'Copied' : 'Copy gasless address'}
+                    {copiedSmart ? 'Copied' : 'Copy wallet address'}
                   </button>
-                )}
-              </div>
-              {gasless && smartAddress && balance === 0 && (
-                <p className="sn-hint">Fund your gasless address once from your wallet, then all future sends cost you no gas.</p>
+                </div>
+              )}
+              {smartAddress && balance === 0 && (
+                <p className="sn-hint">Send funds to this address once to start using FluxPay.</p>
               )}
             </div>
             <div className="sn-field">
@@ -282,7 +218,6 @@ export default function SendPage() {
               </div>
               <p className="sn-hint">Available: {balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}{usd > 0 && <> · ≈ {money(usd)}</>}</p>
             </div>
-            <div className="sn-fee-row"><span>Gas fee</span><strong>{gasless ? 'Sponsored (Pimlico)' : feeMon != null ? `~${feeMon.toFixed(5)} MON` : 'estimating…'}</strong></div>
             <SlideToSend disabled={!canContinue || !!busy} onComplete={() => setStep('confirm')} />
             {!canContinue && <p className="sn-hint sn-hint-center">Enter a recipient and a valid amount (≤ balance) to continue.</p>}
           </div>
@@ -318,8 +253,7 @@ export default function SendPage() {
               <div className="sn-summary">
                 <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
                 <div className="sn-sum-row"><span>Transaction ID</span><strong style={{ wordBreak: 'break-all' }}>{txHash ? shortAddr(txHash) : '—'}</strong></div>
-                {userOpHash && <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{shortAddr(userOpHash)}</strong></div>}
-                <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet{gasless ? ' · gasless' : ''}</strong></div>
+                <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
               </div>
               <div className="sn-actions">
                 {txHash && <a className="ov-btn" href={`${EXPLORER_URL}/tx/${txHash}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> View Transaction</a>}

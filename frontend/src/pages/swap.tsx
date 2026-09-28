@@ -18,7 +18,7 @@ const shortErr = (e: unknown) => {
 }
 
 export default function SwapPage() {
-  const { address, wallet } = useWallet()
+  const { address, wallet, getWalletClient } = useWallet()
   const [fromSym, setFromSym] = useState('MON')
   const [toSym, setToSym] = useState('USDC')
   const [amount, setAmount] = useState('')
@@ -51,11 +51,12 @@ export default function SwapPage() {
 
   const faucet = async () => {
     setFaucetMsg('')
-    if (!wallet || !address) return setFaucetMsg('Log in first.')
+    if (!address) return setFaucetMsg('Log in first.')
     setFaucetBusy(true)
     try {
-      const ethereumProvider = await (wallet as unknown as { getEthereumProvider: () => Promise<unknown> }).getEthereumProvider()
-      await mintKuruUsdc(ethereumProvider, address as `0x${string}`, 100)
+      const walletClient = await getWalletClient()
+      if (!walletClient) throw new Error('wallet_unavailable')
+      await mintKuruUsdc(walletClient, address as `0x${string}`, address as `0x${string}`, 100)
       setFaucetMsg('+100 kUSDC minted to your wallet')
     } catch (e) {
       setFaucetMsg(shortErr(e))
@@ -93,8 +94,11 @@ export default function SwapPage() {
     if (!quote) return setError('No valid quote — adjust the amount.')
     try {
       if (!wallet) throw new Error('wallet_unavailable')
+      const walletClient = await getWalletClient()
+      if (!walletClient) throw new Error('wallet_unavailable')
       const ethereumProvider = await (wallet as unknown as { getEthereumProvider: () => Promise<unknown> }).getEthereumProvider()
       const { txHash: hash, partialFill } = await executeSwap({
+        walletClient,
         ethereumProvider,
         ownerAddress: address as `0x${string}`,
         quote,

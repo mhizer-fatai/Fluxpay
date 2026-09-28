@@ -5,7 +5,7 @@ import { DashboardShell } from '@/components/dashboard-shell'
 import { useProfile } from '@/hooks/profile'
 import { useBalances } from '@/hooks/useBalances'
 import { useWallet } from '@/hooks/useWallet'
-import { sendFunds } from '@/lib/transfers'
+import { buildSettleCalls, sendGasless } from '@/lib/gasless'
 import { getUsdPrices, TOKENS, tokenByKey, type TokenKey } from '@/lib/chain'
 import { resolveUsernameApi } from '@/lib/api'
 import { money, shortAddr } from '@/lib/format'
@@ -94,7 +94,7 @@ export default function TerminalPage() {
           try { to = (await resolveUsernameApi(to.replace(/^@/, ''))).address } catch { push({ kind: 'err', text: `Recipient ${m[3]} is not a valid address or registered username` }); return }
         }
         pending.current = { amount, token: tokenKey, to }
-        push({ kind: 'out', text: `Ready: send ${amount} ${tokenKey} to ${shortAddr(to)}\nType "confirm" to execute (this spends gas).` })
+        push({ kind: 'out', text: `Ready: send ${amount} ${tokenKey} to ${shortAddr(to)}\nType "confirm" to execute.` })
         done('Prepared')
         return
       }
@@ -105,9 +105,10 @@ export default function TerminalPage() {
         const { amount, token: tokenKey, to } = pending.current
         const walletClient = await getWalletClient()
         if (!walletClient) { push({ kind: 'err', text: 'Wallet client unavailable' }); return }
-        push({ kind: 'out', text: 'Executing… approve (if needed) + settle.' })
-        const result = await sendFunds({
-          walletClient, from: address as Address, token: tokenByKey(tokenKey), amountHuman: amount, to: to as Address,
+        push({ kind: 'out', text: 'Executing…' })
+        const result = await sendGasless({
+          walletClient, ownerAddress: address as Address,
+          calls: buildSettleCalls({ token: tokenByKey(tokenKey), amountHuman: amount, to: to as Address }),
         })
         push({ kind: 'out', text: `Confirmed. tx: ${result.txHash}`, txHash: result.txHash })
         done('Transfer', result.txHash)

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, CalendarDays, CreditCard, Plus, X } from 'lucide-react'
-import type { Address } from 'viem'
+import { encodeFunctionData, type Address, type Hash } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
 import { listStreams, type StreamRow } from '@/lib/streams'
-import { erc20Abi, monadTestnet, publicClient, STREAM_VAULT_ADDRESS, streamVaultAbi, TOKENS, type TokenKey } from '@/lib/chain'
+import { erc20Abi, STREAM_VAULT_ADDRESS, streamVaultAbi, TOKENS, type TokenKey } from '@/lib/chain'
+import { sendGasless, type GaslessCall } from '@/lib/gasless'
 import { resolveUsernameApi } from '@/lib/api'
 import { money, shortAddr } from '@/lib/format'
 
@@ -14,7 +15,7 @@ const SECONDS_PER_MONTH = 2_592_000
 
 export default function SubscriptionsPage() {
   const { address } = useProfile()
-  const { getWalletClient } = useWallet()
+  const { smartAddress, getWalletClient } = useWallet()
   const [streams, setStreams] = useState<StreamRow[]>([])
   const [loading, setLoading] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -23,17 +24,31 @@ export default function SubscriptionsPage() {
   const [error, setError] = useState('')
   const [form, setForm] = useState({ recipient: '', amount: '', asset: 'USDC' as TokenKey, months: 1 })
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     if (!address) return
     setLoading(true)
     try {
-      setStreams(await listStreams(address))
+      // Smart account first (all new streams live there), EOA merged for legacy.
+      const lists = await Promise.all([
+        smartAddress ? listStreams(smartAddress, 20, force ? { force: true } : undefined) : Promise.resolve([] as StreamRow[]),
+        listStreams(address, 20, force ? { force: true } : undefined),
+      ])
+      const seen = new Set<string>()
+      const merged: StreamRow[] = []
+      for (const s of [...lists[0], ...lists[1]]) {
+        const k = s.id.toString()
+        if (seen.has(k)) continue
+        seen.add(k)
+        merged.push(s)
+      }
+      merged.sort((a, b) => (a.id === b.id ? 0 : a.id < b.id ? 1 : -1))
+      setStreams(merged)
     } catch {
       setStreams([])
     } finally {
       setLoading(false)
     }
-  }, [address])
+  }, [address, smartAddress])
 
   useEffect(() => {
     void refresh()
@@ -57,6 +72,23 @@ export default function SubscriptionsPage() {
     return null
   }
 
+  const submitCalls = async (calls: GaslessCall[], statusMsg: string) => {
+    if (!address) throw new Error('Wallet not ready')
+    const walletClient = await getWalletClient()
+    if (!walletClient) throw new Error('wallet_unavailable')
+    setBusy(statusMsg)
+    const result = await sendGasless({
+      walletClient,
+      ownerAddress: address as `0x${string}`,
+      calls,
+      onStatus: s => {
+        if (s === 'signing') setBusy('Confirm in your wallet…')
+        else if (s === 'submitted' || s === 'confirmed') setBusy('Confirming…')
+      },
+    })
+    return result.txHash
+  }
+
   const createStream = async () => {
     setError('')
     if (!address) return
@@ -65,31 +97,36 @@ export default function SubscriptionsPage() {
     setBusy('Resolving recipient…')
     try {
       const recipient = await resolveRecipient(form.recipient)
-      if (!recipient) return setError('Recipient must be a valid address or registered @username')
+      if (!recipient) {
+        setBusy('')
+        return setError('Recipient must be a valid address or registered @username')
+      }
       const token = TOKENS.find(t => t.key === form.asset)!
-      const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('wallet_unavailable')
       const rawMonthly = BigInt(Math.round(amount * 10 ** token.decimals))
       // ratePerSecondX18 = rawMonthly * 1e18 / secondsPerMonth
       const rateX18 = (rawMonthly * 10n ** 18n) / BigInt(SECONDS_PER_MONTH)
       const initialDeposit = rawMonthly * BigInt(Math.max(1, Math.floor(form.months)))
-      setBusy('Approving token…')
-      const approveHash = await walletClient.writeContract({
-        account: address as `0x${string}`, chain: monadTestnet,
-        address: token.address!, abi: erc20Abi, functionName: 'approve', args: [STREAM_VAULT_ADDRESS, initialDeposit],
-      })
-      await publicClient.waitForTransactionReceipt({ hash: approveHash })
-      setBusy('Creating stream…')
-      const hash = await walletClient.writeContract({
-        account: address as `0x${string}`, chain: monadTestnet,
-        address: STREAM_VAULT_ADDRESS, abi: streamVaultAbi, functionName: 'create',
-        args: [recipient as Address, token.address!, rateX18, initialDeposit],
-      })
-      const receipt = await publicClient.waitForTransactionReceipt({ hash })
-      if (receipt.status !== 'success') throw new Error('create_reverted')
+      await submitCalls(
+        [
+          {
+            to: token.address!,
+            data: encodeFunctionData({
+              abi: erc20Abi, functionName: 'approve', args: [STREAM_VAULT_ADDRESS, initialDeposit],
+            }),
+          },
+          {
+            to: STREAM_VAULT_ADDRESS,
+            data: encodeFunctionData({
+              abi: streamVaultAbi, functionName: 'create',
+              args: [recipient as Address, token.address!, rateX18, initialDeposit],
+            }),
+          },
+        ],
+        'Creating stream…',
+      )
       setAddOpen(false)
       setForm({ recipient: '', amount: '', asset: 'USDC', months: 1 })
-      void refresh()
+      void refresh(true)
     } catch (e) {
       const err = e as Error & { shortMessage?: string }
       setError(err.shortMessage || err.message || 'Failed to create stream')
@@ -101,18 +138,16 @@ export default function SubscriptionsPage() {
   const streamAction = async (s: StreamRow, action: 'pause' | 'resume' | 'cancel' | 'withdraw') => {
     setError('')
     if (!address) return
-    setBusy(`${action}…`)
     try {
-      const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('wallet_unavailable')
-      const hash = await walletClient.writeContract({
-        account: address as `0x${string}`, chain: monadTestnet,
-        address: STREAM_VAULT_ADDRESS, abi: streamVaultAbi, functionName: action, args: [s.id],
-      })
-      const receipt = await publicClient.waitForTransactionReceipt({ hash })
-      if (receipt.status !== 'success') throw new Error(`${action}_reverted`)
+      await submitCalls(
+        [{
+          to: STREAM_VAULT_ADDRESS,
+          data: encodeFunctionData({ abi: streamVaultAbi, functionName: action, args: [s.id] }),
+        }],
+        `${action}…`,
+      )
       setDetail(null)
-      void refresh()
+      void refresh(true)
     } catch (e) {
       const err = e as Error & { shortMessage?: string }
       setError(err.shortMessage || err.message || 'Action failed')
