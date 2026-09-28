@@ -10,7 +10,8 @@ type Phase = 'form' | 'saving' | 'done'
 
 export default function OnboardingPage() {
   const navigate = useNavigate()
-  const { ready, authenticated, address } = useWallet()
+  const { ready, authenticated, address, smartAddress } = useWallet()
+  const walletAddr = smartAddress ?? address
   const { completeOnboarding, profile, status } = useProfile()
 
   const [fullName, setFullName] = useState('')
@@ -114,7 +115,7 @@ export default function OnboardingPage() {
 
           <p className="auth-email-label">Wallet</p>
           <p style={{ fontFamily: 'monospace', fontSize: 12, margin: '0 0 16px', wordBreak: 'break-all' }}>
-            {address ?? 'connecting…'}
+            {walletAddr ?? 'connecting…'}
           </p>
 
           {error && <p style={{ color: '#ef4444', fontSize: 13, margin: '0 0 12px' }}>{error}</p>}

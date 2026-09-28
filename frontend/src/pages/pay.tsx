@@ -13,7 +13,7 @@ type Phase = 'loading' | 'ready' | 'paying' | 'done' | 'error'
 
 export default function PayPage() {
   const { login, authenticated, ready } = usePrivy()
-  const { address, getWalletClient } = useWallet()
+  const { address, smartAddress, getWalletClient } = useWallet()
   const [link, setLink] = useState<PaymentLinkDto | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
   const [txHash, setTxHash] = useState<string | null>(null)
@@ -61,7 +61,7 @@ export default function PayPage() {
         onStatus: () => setPhase('paying'),
       })
       // Record on the backend (verifies the tx on-chain, flips pending→paid once).
-      const updated = await recordLinkPaid(link.id, { txHash: result.txHash, payerAddress: address })
+      const updated = await recordLinkPaid(link.id, { txHash: result.txHash, payerAddress: (smartAddress ?? address) as string })
       setLink(updated)
       setTxHash(result.txHash)
       setPhase('done')

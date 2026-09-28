@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useLayoutEffect, useRef, useState, Fragment, useEffect } from 'react'
 import { Bell, Bot, CalendarDays, ChevronDown, CircleHelp, CreditCard, LayoutDashboard, Search, Send, Settings, Sparkles, Wallet, WalletMinimal, ArrowLeftRight, Activity, Link2, Landmark, type LucideIcon } from 'lucide-react'
 import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
 import { fetchActivity } from '@/lib/activity'
 import { resolveUsernameApi, checkUsername } from '@/lib/api'
 import { money, initials, shortAddr, timeAgo } from '@/lib/format'
@@ -35,7 +36,9 @@ const loadReadIds = (): string[] => {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = useLocation().pathname
   const navigate = useNavigate()
-  const { profile, address } = useProfile()
+  const { profile, address: profileAddress } = useProfile()
+  const { moneyAddress } = useWallet()
+  const address = moneyAddress ?? profileAddress
   const activeIndex = nav.findIndex(item => item.href === pathname)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const currentIndex = hoverIndex ?? (activeIndex >= 0 ? activeIndex : 0)
