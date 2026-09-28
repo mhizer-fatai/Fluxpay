@@ -21,9 +21,11 @@ const quickActions: Array<{ label: string; icon: LucideIcon; href: string; soon?
 
 export default function DashboardPage() {
   const { profile, address: profileAddress } = useProfile()
-  const { moneyAddress } = useWallet()
+  const { moneyAddress, smartAddress } = useWallet()
   const address = moneyAddress ?? profileAddress
-  const { rows, totalUsd, loading } = useBalances(address)
+  const { rows, totalUsd, loading } = useBalances(
+    smartAddress && profileAddress ? [profileAddress, smartAddress] : address,
+  )
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof fetchActivity>>>([])
   const [exporting, setExporting] = useState(false)

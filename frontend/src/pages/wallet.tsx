@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowDownLeft, ArrowLeftRight, ArrowRight, Copy, Link2, QrCode, Send, X } from 'lucide-react'
+import { encodeFunctionData, type Address } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { fetchActivity } from '@/lib/activity'
+import { TOKENS, erc20Abi } from '@/lib/chain'
+import { bustRpcCache } from '@/lib/rpc'
 import { money, shortAddr, timeAgo } from '@/lib/format'
 import type { ActivityItem } from '@/lib/activity'
 
@@ -13,9 +16,11 @@ const TOKEN_COLORS: Record<string, string> = { MON: '#6E56CF', USDC: '#2775CA', 
 
 export default function WalletPage() {
   const { address: profileAddress, profile } = useProfile()
-  const { moneyAddress } = useWallet()
+  const { moneyAddress, smartAddress, getWalletClient } = useWallet()
   const address = moneyAddress ?? profileAddress
-  const { rows, totalUsd, loading, error, refresh } = useBalances(address)
+  const { rows, totalUsd, loading, error, refresh } = useBalances(
+    smartAddress && profileAddress ? [profileAddress, smartAddress] : address,
+  )
   const [asset, setAsset] = useState<{ key: string; amount: number; usd: number } | null>(null)
   const [copied, setCopied] = useState(false)
   const [activity, setActivity] = useState<ActivityItem[]>([])
@@ -37,6 +42,59 @@ export default function WalletPage() {
     navigator.clipboard?.writeText(address).catch(() => {})
     setCopied(true)
     setTimeout(() => setCopied(false), 1600)
+  }
+
+  // One-time consolidation: move everything from the login wallet into the
+  // FluxPay smart account so it becomes spendable. Plain transfer, one-time.
+  const [moving, setMoving] = useState(false)
+  const [moveMsg, setMoveMsg] = useState('')
+  const { rows: eoaRows } = useBalances(profileAddress)
+  const eoaTotal = eoaRows.reduce((s, r) => s + r.usd, 0)
+  const showMove = Boolean(
+    smartAddress && profileAddress &&
+    smartAddress.toLowerCase() !== profileAddress.toLowerCase() && eoaTotal > 0,
+  )
+
+  const moveFunds = async () => {
+    setMoveMsg('')
+    if (!profileAddress || !smartAddress) return
+    try {
+      const walletClient = await getWalletClient()
+      if (!walletClient) throw new Error('wallet_unavailable')
+      setMoving(true)
+      const to = smartAddress as Address
+      const from = profileAddress as Address
+      for (const row of eoaRows) {
+        if (row.amount <= 0) continue
+        const token = TOKENS.find(t => t.key === row.key)
+        if (!token) continue
+        if (!token.address) {
+          // Native MON: leave a little behind for this one-time transfer's own gas.
+          const keep = BigInt(5e16) // 0.05 MON
+          if (row.raw <= keep) continue
+          const hash = await walletClient.sendTransaction({
+            account: from, to, value: row.raw - keep, gas: 100000n,
+          } as never)
+          void hash
+        } else {
+          const data = encodeFunctionData({
+            abi: erc20Abi, functionName: 'transfer', args: [to, row.raw],
+          })
+          const hash = await walletClient.sendTransaction({
+            account: from, to: token.address, data, gas: 150000n,
+          } as never)
+          void hash
+        }
+      }
+      bustRpcCache('balances:')
+      await refresh()
+      setMoveMsg('Funds moved — your FluxPay wallet is ready.')
+    } catch (e) {
+      const err = e as Error & { shortMessage?: string }
+      setMoveMsg(err.shortMessage || err.message || 'Move failed — try again')
+    } finally {
+      setMoving(false)
+    }
   }
 
   return <DashboardShell>
@@ -73,6 +131,12 @@ export default function WalletPage() {
               <button className="wa-btn" onClick={copyAddress}><Copy size={14} /> {copied ? 'Copied' : 'Copy Address'}</button>
               <Link className="wa-btn" to="/receive"><QrCode size={14} /> QR Code</Link>
             </div>
+            {showMove && (
+              <div className="wa-addr-actions" style={{ marginTop: 8 }}>
+                <button className="wa-btn primary" onClick={moveFunds} disabled={moving}>{moving ? 'Moving…' : 'Move funds here'}</button>
+              </div>
+            )}
+            {moveMsg && <p className="sn-hint" style={{ marginTop: 8 }}>{moveMsg}</p>}
           </div>
         </div>
       </div>
