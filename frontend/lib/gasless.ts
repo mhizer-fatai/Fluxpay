@@ -111,6 +111,9 @@ export async function sendGasless(opts: {
     ),
   ])
   opts.onStatus?.('submitted')
+  // Surfaced immediately: with this hash anyone can look the operation up in
+  // Pimlico's User Operation Logs or query its receipt directly.
+  console.info('[gasless] userOp submitted:', userOpHash)
 
   // Bounded receipt wait: surfaces a clear timeout instead of hanging on 'Sending…' forever.
   const receipt = await Promise.race([
