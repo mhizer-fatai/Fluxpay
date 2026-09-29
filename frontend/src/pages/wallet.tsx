@@ -5,7 +5,7 @@ import { DashboardShell } from '@/components/dashboard-shell'
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
-import { fetchActivity } from '@/lib/activity'
+import { fetchActivity, peekActivity } from '@/lib/activity'
 import { money, shortAddr, timeAgo } from '@/lib/format'
 import type { ActivityItem } from '@/lib/activity'
 
@@ -25,11 +25,13 @@ export default function WalletPage() {
 
   useEffect(() => {
     if (!address) return
+    const peeked = peekActivity(address)
+    if (peeked && peeked.length > 0) setActivity(peeked.slice(0, 5))
     setActivityLoading(true)
     const held = rows.filter(r => r.amount > 0).map(r => r.key)
     fetchActivity(address, 1800, held.length > 0 ? { tokenKeys: held } : undefined)
       .then(items => setActivity(items.slice(0, 5)))
-      .catch(() => setActivity([]))
+      .catch(() => { /* keep peeked items on failure */ })
       .finally(() => setActivityLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address])

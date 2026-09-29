@@ -3,7 +3,7 @@ import { ArrowDownLeft, ArrowRight, ArrowUpRight, Download, Search, X, type Luci
 import { DashboardShell } from '@/components/dashboard-shell'
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
-import { fetchActivity, type ActivityItem } from '@/lib/activity'
+import { fetchActivity, peekActivity, type ActivityItem } from '@/lib/activity'
 import { getUsdPrices, TOKENS } from '@/lib/chain'
 import { money, shortAddr, timeAgo } from '@/lib/format'
 import { EXPLORER_URL } from '@/lib/chain'
@@ -30,7 +30,13 @@ export default function ActivityPage() {
 
   useEffect(() => {
     if (!address) return
-    setLoading(true)
+    const peeked = peekActivity(address)
+    if (peeked && peeked.length > 0) {
+      setItems(peeked)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     setError('')
     fetchActivity(address)
       .then(setItems)
@@ -140,7 +146,7 @@ export default function ActivityPage() {
 
         <div className="ac-table">
           <div className="ac-tr ac-th"><span>Date</span><span>Type</span><span>Counterparty</span><span>Amount</span><span>Status</span></div>
-          {loading && <p className="ac-empty">Reading on-chain history…</p>}
+          {loading && items.length === 0 && <p className="ac-empty">Reading on-chain history…</p>}
           {error && <p className="ac-empty">{error}</p>}
           {!loading && !error && filtered.slice(0, visible).map((t, idx) => {
             const Icon = TypeIcon[t.event] ?? ArrowUpRight

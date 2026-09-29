@@ -26,9 +26,48 @@ const WMON = TOKENS.find(t => t.key === 'WMON')?.address as Address | undefined
 // Block timestamps are immutable → cached forever.
 
 const ACTIVITY_TTL_MS = 60_000
+const PERSIST_TTL_MS = 10 * 60_000
 const activityCache = new Map<string, { at: number; items: ActivityItem[] }>()
 const inflight = new Map<string, Promise<ActivityItem[]>>()
 const blockTsCache = new Map<bigint, number>()
+
+function persistKey(address: string): string {
+  return `fluxpay_activity:${address.toLowerCase()}`
+}
+
+function serialize(items: ActivityItem[]): string {
+  return JSON.stringify(items, (_k, v) => (typeof v === 'bigint' ? `bigint:${v.toString()}` : v))
+}
+
+function deserialize(raw: string): ActivityItem[] | null {
+  try {
+    const arr = JSON.parse(raw, (_k, v) =>
+      typeof v === 'string' && v.startsWith('bigint:') ? BigInt(v.slice(7)) : v,
+    ) as ActivityItem[]
+    return Array.isArray(arr) ? arr : null
+  } catch {
+    return null
+  }
+}
+
+/** Last-known activity from disk (any freshness within TTL) — instant first paint. */
+export function peekActivity(address: string): ActivityItem[] | null {
+  try {
+    const raw = localStorage.getItem(persistKey(address))
+    if (!raw) return null
+    const wrap = JSON.parse(raw) as { at: number; items: string }
+    if (Date.now() - wrap.at > PERSIST_TTL_MS) return null
+    return deserialize(wrap.items)
+  } catch {
+    return null
+  }
+}
+
+function persistActivity(address: string, items: ActivityItem[]): void {
+  try {
+    localStorage.setItem(persistKey(address), JSON.stringify({ at: Date.now(), items: serialize(items) }))
+  } catch { /* storage full/blocked — memory cache still works */ }
+}
 
 export function bustActivityCache(address: string): void {
   const prefix = address.toLowerCase()
@@ -287,7 +326,7 @@ async function scanRpc(address: string, lookback: number, tokens: Address[]): Pr
  */
 export async function fetchActivity(
   address: string,
-  lookback = 1800,
+  lookback = 600,
   opts?: { force?: boolean; tokenKeys?: TokenKey[] },
 ): Promise<ActivityItem[]> {
   const key = `${address.toLowerCase()}:${lookback}:${opts?.tokenKeys?.join(',') ?? 'all'}`
@@ -304,9 +343,11 @@ export async function fetchActivity(
     .filter((a): a is Address => Boolean(a))
 
   const p = (async () => {
-    const [backendItems, rpcItems] = await Promise.all([
-      fetchBackendActivity(address),
+    // Backend first (fast, <1s): never let the slow RPC scan hold the paint hostage.
+    const backendItems = await fetchBackendActivity(address)
+    const rpcItems = await Promise.race([
       scanRpc(address, lookback, tokens).catch((): ActivityItem[] => []),
+      new Promise<ActivityItem[]>(resolve => setTimeout(() => resolve([]), 12_000)),
     ])
     const seen = new Set<string>()
     const merged: ActivityItem[] = []
@@ -324,6 +365,7 @@ export async function fetchActivity(
   })()
     .then(items => {
       activityCache.set(key, { at: Date.now(), items })
+      persistActivity(address, items)
       return items
     })
     .finally(() => inflight.delete(key))

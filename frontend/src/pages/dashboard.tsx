@@ -9,7 +9,7 @@ import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { listStreams } from '@/lib/streams'
-import { fetchActivity } from '@/lib/activity'
+import { fetchActivity, peekActivity } from '@/lib/activity'
 import { money, timeAgo } from '@/lib/format'
 
 const quickActions: Array<{ label: string; icon: LucideIcon; href: string; soon?: boolean }> = [
@@ -32,8 +32,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!address) return
+    const peeked = peekActivity(address)
+    if (peeked && peeked.length > 0) setActivity(peeked.slice(0, 6))
     void listStreams(address).then(setStreams).catch(() => setStreams([]))
-    void fetchActivity(address).then(items => setActivity(items.slice(0, 6))).catch(() => setActivity([]))
+    void fetchActivity(address).then(items => setActivity(items.slice(0, 6))).catch(() => { /* keep peeked items */ })
   }, [address])
 
   const hour = new Date().getHours()
