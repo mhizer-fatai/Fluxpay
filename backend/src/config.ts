@@ -20,6 +20,12 @@ export const config = {
     ),
   },
   redisUrl: req("REDIS_URL", "redis://localhost:6379"),
+  // Pimlico bundler + paymaster. Server-side only — never expose with a VITE_ prefix.
+  // Optional at startup so local dev works without it; the AA proxy returns 503 when unset.
+  pimlico: {
+    apiKey: process.env.PIMLICO_API_KEY || "",
+    baseUrl: "https://api.pimlico.io/v2",
+  },
   // Contracts (filled from deployments/ once deployed)
   contracts: {
     usdc: process.env.USDC_ADDRESS,

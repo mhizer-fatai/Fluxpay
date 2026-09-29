@@ -6,6 +6,15 @@ export function setTokenProvider(fn: () => Promise<string | null>) {
   tokenProvider = fn
 }
 
+/** Raw access token for transports that need an Authorization header (e.g. the AA proxy). */
+export async function getAuthToken(): Promise<string | null> {
+  try {
+    return await tokenProvider()
+  } catch {
+    return null
+  }
+}
+
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   let token: string | null = null
   try {

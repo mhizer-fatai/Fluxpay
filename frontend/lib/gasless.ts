@@ -4,10 +4,26 @@ import { createSmartAccountClient } from 'permissionless/clients'
 import { createPimlicoClient } from 'permissionless/clients/pimlico'
 import { toSimpleSmartAccount } from 'permissionless/accounts'
 import { erc20Abi, FLUXPAY_ADDRESS, fluxPayAbi, monadTestnet, type TokenInfo } from './chain'
+import { getAuthToken } from './api'
 
 const ENTRYPOINT_V06 = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' as Address // verified live via Pimlico eth_supportedEntryPoints
 
-const PIMLICO_URL = `https://api.pimlico.io/v2/10143/rpc?apikey=${import.meta.env.VITE_PIMLICO_API_KEY ?? ''}`
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+// Pimlico is reached ONLY through our authenticated backend proxy, so the API key
+// never ships in the browser bundle or appears in DevTools network requests.
+const PIMLICO_PROXY_URL = `${API_URL}/api/v1/aa/rpc`
+
+async function pimlicoFetch(input: any, init?: any): Promise<Response> {
+  const token = await getAuthToken()
+  return fetch(input, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init?.headers,
+    },
+  })
+}
 
 const publicClient = createPublicClient({ chain: monadTestnet, transport: http() })
 
@@ -30,8 +46,6 @@ function privySignerToAccount(walletClient: WalletClient, address: Address) {
   })
 }
 
-export const hasPimlicoKey = () => Boolean(import.meta.env.VITE_PIMLICO_API_KEY)
-
 /** Deterministic smart-account address for an owner (counterfactual until first userOp). */
 export async function getGaslessAddress(ownerAddress: Address, walletClient: WalletClient): Promise<Address> {
   const owner = privySignerToAccount(walletClient, ownerAddress)
@@ -52,8 +66,9 @@ export interface GaslessCall {
 /**
  * THE transaction path for the whole app: batches arbitrary calls into ONE ERC-4337
  * userOp from the user's smart account, gas paid invisibly by the Pimlico paymaster
- * policy tied to VITE_PIMLICO_API_KEY. There is no other send path — the user never
- * sees gas, fees, or toggles. Requires the funding/policy in the Pimlico dashboard.
+ * policy configured server-side. There is no other send path — the user never
+ * sees gas, fees, or toggles. Pimlico is reached only through our authenticated
+ * backend proxy (/api/v1/aa/rpc); no API key ever ships to the browser.
  */
 export async function sendGasless(opts: {
   walletClient: WalletClient
@@ -64,7 +79,7 @@ export async function sendGasless(opts: {
   const owner = privySignerToAccount(opts.walletClient, opts.ownerAddress)
 
   const pimlicoClient = createPimlicoClient({
-    transport: http(PIMLICO_URL),
+    transport: http(PIMLICO_PROXY_URL, { fetchFn: pimlicoFetch as typeof fetch }),
     entryPoint: { address: ENTRYPOINT_V06, version: '0.6' },
   })
 
@@ -77,7 +92,7 @@ export async function sendGasless(opts: {
   const smartAccountClient = createSmartAccountClient({
     account,
     chain: monadTestnet,
-    bundlerTransport: http(PIMLICO_URL),
+    bundlerTransport: http(PIMLICO_PROXY_URL, { fetchFn: pimlicoFetch as typeof fetch }),
     paymaster: pimlicoClient,
     userOperation: {
       estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast,
@@ -90,7 +105,13 @@ export async function sendGasless(opts: {
   })
   opts.onStatus?.('submitted')
 
-  const receipt = await pimlicoClient.waitForUserOperationReceipt({ hash: userOpHash })
+  // Bounded receipt wait: surfaces a clear timeout instead of hanging on 'Sending…' forever.
+  const receipt = await Promise.race([
+    pimlicoClient.waitForUserOperationReceipt({ hash: userOpHash }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Confirmation timed out after 120s — check Activity, the transaction may still land.')), 120_000),
+    ),
+  ])
   opts.onStatus?.('confirmed')
   return { userOpHash, txHash: receipt.receipt.transactionHash }
 }
