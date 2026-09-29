@@ -36,7 +36,10 @@ export interface AaRpcRequest {
 export const aaService = {
   async forward(req: AaRpcRequest): Promise<unknown> {
     if (!ALLOWED_METHODS.has(req.method)) {
-      throw new AppError("method not allowed through AA proxy", 403, "aa_method_forbidden");
+      logger.warn("aa_method_forbidden", { method: req.method });
+      throw new AppError("method not allowed through AA proxy", 403, "aa_method_forbidden", {
+        method: req.method,
+      });
     }
     if (!config.pimlico.apiKey) {
       throw new AppError("paymaster not configured", 503, "aa_not_configured");
