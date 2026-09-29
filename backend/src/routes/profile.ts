@@ -10,7 +10,26 @@ export const profileRouter = Router();
 const addressSchema = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
 const usernameSchema = z.string().regex(/^[a-z0-9_]{3,32}$/);
 
-/** GET /api/v1/profile?address=0x... */
+/** GET /api/v1/profile/resolve?addresses=0x..,0x.. — first existing profile, smart account first. */
+profileRouter.get(
+  "/resolve",
+  requireAuth,
+  attachAuthToContext,
+  validate({ query: z.object({ addresses: z.string().min(1).max(500) }) }),
+  async (req, res, next) => {
+    try {
+      const { addresses } = res.locals.query as { addresses: string };
+      const list = addresses.split(",").map(a => a.trim()).filter(a => /^0x[a-fA-F0-9]{40}$/.test(a));
+      if (list.length === 0) {
+        res.status(400).json({ error: "validation_failed" });
+        return;
+      }
+      res.json(await profileService.resolve(list));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 profileRouter.get(
   "/",
   requireAuth,

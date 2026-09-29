@@ -25,6 +25,15 @@ export const profileRepo = {
     return rows[0] ?? null;
   },
 
+  /** First matching profile for an ordered address list (smart account first, legacy EOA second). */
+  async findFirstByAddresses(addresses: string[]): Promise<ProfileRow | null> {
+    for (const address of addresses) {
+      const row = await profileRepo.findByAddress(address.toLowerCase());
+      if (row) return row;
+    }
+    return null;
+  },
+
   async isUsernameTaken(username: string): Promise<boolean> {
     const rows = await query<{ taken: boolean }>(
       `SELECT EXISTS(SELECT 1 FROM usernames WHERE username = $1) AS taken`,

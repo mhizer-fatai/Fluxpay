@@ -40,6 +40,10 @@ export interface Profile {
 
 export const fetchProfile = (address: string) => api<Profile>(`/api/v1/profile?address=${address.toLowerCase()}`)
 
+/** Single-call resolve across candidate addresses (smart first, legacy EOA second). */
+export const resolveProfile = (addresses: string[]) =>
+  api<Profile>(`/api/v1/profile/resolve?addresses=${addresses.map(a => a.toLowerCase()).join(',')}`)
+
 export const saveProfile = (body: { address: string; fullName: string; email?: string }) =>
   api<Profile>('/api/v1/profile', { method: 'PUT', body: JSON.stringify(body) })
 

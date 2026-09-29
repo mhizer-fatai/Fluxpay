@@ -26,6 +26,14 @@ export const profileService = {
     return toProfileDto(row);
   },
 
+  /** Resolve the first existing profile across candidate addresses (one request, no 404 probing). */
+  async resolve(addresses: string[]): Promise<ProfileDto> {
+    const clean = [...new Set(addresses.map(a => a.toLowerCase()))].slice(0, 5);
+    const row = await profileRepo.findFirstByAddresses(clean);
+    if (!row) throw notFound("profile");
+    return toProfileDto(row);
+  },
+
   async upsertBase(input: { address: string; fullName: string; email?: string; privyUserId: string }): Promise<ProfileDto> {
     const result = await profileRepo.upsertBaseGuarded({
       address: input.address,

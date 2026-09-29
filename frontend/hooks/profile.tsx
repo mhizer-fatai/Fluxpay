@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useWallet } from './useWallet'
-import { claimUsername, fetchProfile, setTokenProvider, type Profile } from '../lib/api'
+import { claimUsername, resolveProfile, setTokenProvider, type Profile } from '../lib/api'
 
 type ProfileStatus = 'loading' | 'onboarded' | 'needs_onboarding' | 'anonymous'
 
@@ -37,16 +37,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     }
     setStatus('loading')
     try {
-      // Prefer the smart-account profile (new claims bind there); fall back to the EOA row.
-      let p: Profile | null = null
-      if (smartAddress) {
-        try {
-          p = await fetchProfile(smartAddress)
-        } catch (err) {
-          if ((err as { status?: number }).status !== 404) throw err
-        }
-      }
-      p ??= await fetchProfile(address)
+      // One call across candidates: smart-account profile first, legacy EOA row second.
+      const candidates = [smartAddress, address].filter((a): a is string => Boolean(a))
+      const p = await resolveProfile(candidates)
       setProfile(p)
       setStatus('onboarded')
     } catch (err) {

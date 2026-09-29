@@ -193,18 +193,21 @@ export const formatTokenAmount = (raw: bigint, decimals: number, maxFrac = 6): s
 
 export const shortenAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
-// USD prices: stables are $1 by definition; volatile tokens use CoinGecko with graceful fallback.
+// USD prices: stables are $1 by definition. Volatile prices come from OUR backend
+// (/api/v1/prices proxies CoinGecko server-side — browsers get CORS-blocked there).
+// Cached 5 min here; backend caches 60s.
 let priceCache: { at: number; prices: Record<TokenKey, number> } | null = null
 export async function getUsdPrices(): Promise<Record<TokenKey, number>> {
   if (priceCache && Date.now() - priceCache.at < 5 * 60 * 1000) return priceCache.prices
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
   const prices: Record<TokenKey, number> = { MON: 0, USDC: 1, AUSD: 1, WETH: 0, WMON: 0, KUSDC: 1 }
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=monad,ethereum&vs_currencies=usd')
+    const res = await fetch(`${API_URL}/api/v1/prices`)
     if (res.ok) {
-      const data = await res.json()
-      if (data.monad?.usd) prices.MON = data.monad.usd
-      if (data.ethereum?.usd) prices.WETH = data.ethereum.usd
-      prices.WMON = prices.MON
+      const data = (await res.json()) as Partial<Record<TokenKey, number>>
+      for (const k of Object.keys(prices) as TokenKey[]) {
+        if (typeof data[k] === 'number') prices[k] = data[k] as number
+      }
     }
   } catch { /* keep fallback */ }
   priceCache = { at: Date.now(), prices }

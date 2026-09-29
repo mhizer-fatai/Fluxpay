@@ -48,10 +48,10 @@ function loadPersisted(cacheKey: string): { rows: BalanceRow[]; totalUsd: number
  * background — the UI never sits on zeros waiting for the RPC.
  */
 export function useBalances(address: string | Array<string | null> | null): BalancesState {
-  const addrs = useMemo(() => {
-    const list = (Array.isArray(address) ? address : [address]).filter((a): a is string => Boolean(a))
-    return [...new Set(list.map(a => a.toLowerCase()))]
-  }, [address])
+  // Joined string key: value-stable across renders even when callers pass inline arrays.
+  const list = (Array.isArray(address) ? address : [address]).filter((a): a is string => Boolean(a));
+  const key = [...new Set(list.map(a => a.toLowerCase()))].sort().join(',');
+  const addrs = useMemo(() => key.split(',').filter(Boolean), [key]);
   const cacheKey = addrs.join(',')
 
   const [rows, setRows] = useState<BalanceRow[]>(() => loadPersisted(cacheKey)?.rows ?? empty)
