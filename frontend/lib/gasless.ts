@@ -115,11 +115,13 @@ export async function sendGasless(opts: {
   // Pimlico's User Operation Logs or query its receipt directly.
   console.info('[gasless] userOp submitted:', userOpHash)
 
-  // Bounded receipt wait: surfaces a clear timeout instead of hanging on 'Sending…' forever.
+  // Bounded receipt wait: the testnet bundler can take minutes to include a userOp.
+  // Critical: a timeout does NOT cancel the operation — it may still land later,
+  // so the message must warn against blind retrying (double-send risk).
   const receipt = await Promise.race([
     pimlicoClient.waitForUserOperationReceipt({ hash: userOpHash }),
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Confirmation timed out after 120s — check Activity, the transaction may still land.')), 120_000),
+      setTimeout(() => reject(new Error('Still waiting on confirmation after 5 minutes — check Activity before retrying: this transaction may still land and retrying could send twice.')), 300_000),
     ),
   ])
   opts.onStatus?.('confirmed')
