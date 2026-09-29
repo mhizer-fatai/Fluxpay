@@ -7,9 +7,17 @@ export function useWallet() {
   const { ready, authenticated, user, getAccessToken, logout } = usePrivy()
   const { wallets } = useWallets()
 
+  // The app never reads external wallets: identity is ALWAYS the embedded wallet.
+  // External connected wallets are filtered out entirely (no wallet login, no connectors).
+  const isEmbedded = (w: { walletClientType?: string }) =>
+    !w.walletClientType || w.walletClientType === 'privy' || w.walletClientType === 'embedded'
+
+  const embeddedWallets = wallets.filter(w => isEmbedded(w as { walletClientType?: string }))
+
   const privyWallet =
-    wallets.find(w => w.address && user?.wallet?.address && w.address.toLowerCase() === user.wallet.address.toLowerCase()) ??
-    wallets[0]
+    embeddedWallets.find(w => w.address && user?.wallet?.address && w.address.toLowerCase() === user.wallet.address.toLowerCase()) ??
+    embeddedWallets[0] ??
+    null
 
   const address = (privyWallet?.address ?? user?.wallet?.address ?? null) as string | null
 

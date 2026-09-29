@@ -17,7 +17,7 @@ createRoot(document.getElementById('root')!).render(
       config={{
         defaultChain: monadTestnet,
         supportedChains: [monadTestnet],
-        loginMethods: ['google', 'twitter', 'apple', 'email', 'passkey', 'wallet'],
+        loginMethods: ['google', 'email', 'twitter'],
         embeddedWallets: { ethereum: { createOnLogin: 'users-without-wallets' } },
       }}
     >
