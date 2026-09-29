@@ -9,13 +9,40 @@ import { useWallet } from '@/hooks/useWallet'
 import { buildSettleCalls, sendGasless } from '@/lib/gasless'
 import { fetchActivity } from '@/lib/activity'
 import { getUsdPrices, TOKENS, type TokenKey } from '@/lib/chain'
-import { resolveUsernameApi } from '@/lib/api'
+import { resolveUsernameApi, createPaymentIntent, patchPaymentIntent } from '@/lib/api'
 import { money, shortAddr } from '@/lib/format'
 import { EXPLORER_URL } from '@/lib/chain'
 
 type Step = 'form' | 'confirm' | 'sending' | 'success'
 
 const SENDABLE: TokenKey[] = ['USDC', 'KUSDC', 'AUSD', 'WMON', 'WETH', 'MON']
+
+const PENDING_KEY = 'fluxpay_pending_intents'
+const PENDING_TTL_MS = 15 * 60_000
+
+interface PendingIntent {
+  key: string
+  intentId: string
+  to: string
+  asset: string
+  amount: string
+  at: number
+}
+
+function loadPending(): PendingIntent[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(PENDING_KEY) ?? '[]') as PendingIntent[]
+    return list.filter(p => Date.now() - p.at < PENDING_TTL_MS)
+  } catch {
+    return []
+  }
+}
+
+function savePending(list: PendingIntent[]) {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(list))
+  } catch { /* ignore */ }
+}
 
 function SlideToSend({ onComplete, disabled }: { onComplete: () => void; disabled?: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null)
@@ -125,6 +152,7 @@ export default function SendPage() {
     setError('')
     if (!address) return setError('Wallet not ready')
     setBusy('Resolving recipient…')
+    let intentId: string | null = null
     try {
       const to = await resolveRecipient()
       if (!to) return setError('Recipient must be a valid 0x address or a registered @username')
@@ -133,13 +161,51 @@ export default function SendPage() {
       if (!walletClient) throw new Error('wallet_unavailable')
 
       if (!spendAddress) throw new Error('Account not ready — wait a moment and try again')
+
+      // Idempotency: same (to, asset, amount) within 15 min reuses the pending intent
+      // instead of building a second payment.
+      const rawAmount = BigInt(Math.round(amt * 10 ** asset.decimals)).toString()
+      const dupe = loadPending().find(
+        p => p.to.toLowerCase() === to.toLowerCase() && p.asset === asset.key && p.amount === rawAmount,
+      )
+      if (dupe) {
+        return setError('This exact send is already pending — check Activity before trying again.')
+      }
+      const idempotencyKey = crypto.randomUUID().replace(/-/g, '')
+      const intent = await createPaymentIntent({
+        idempotencyKey,
+        fromAddress: spendAddress,
+        toAddress: to,
+        asset: asset.key,
+        amountRaw: rawAmount,
+      })
+      intentId = intent.intentId
+      if (intent.status === 'confirmed') {
+        setTxHash(intent.txHash)
+        setBusy('')
+        setStep('success')
+        return
+      }
+      savePending([
+        ...loadPending().filter(p => p.intentId !== intent.intentId),
+        { key: idempotencyKey, intentId: intent.intentId, to, asset: asset.key, amount: rawAmount, at: Date.now() },
+      ])
       const calls = buildSettleCalls({ token: asset, amountHuman: amt, to: to as `0x${string}` })
       const result = await sendGasless({
         walletClient,
         ownerAddress: address as `0x${string}`,
         calls,
-        onStatus: s => setBusy(s === 'signing' ? 'Confirm in your wallet…' : s === 'submitted' ? 'Sending…' : 'Confirming…'),
+        onStatus: s => {
+          setBusy(s === 'signing' ? 'Confirm in your wallet…' : s === 'submitted' ? 'Sending…' : 'Confirming…')
+          if (s === 'submitted' && intentId) {
+            void patchPaymentIntent(intentId, { status: 'submitted' }).catch(() => {})
+          }
+        },
       })
+      if (intentId) {
+        savePending(loadPending().filter(p => p.intentId !== intentId))
+        void patchPaymentIntent(intentId, { status: 'confirmed', txHash: result.txHash }).catch(() => {})
+      }
       setTxHash(result.txHash)
       void refreshSmart()
       setBusy('')

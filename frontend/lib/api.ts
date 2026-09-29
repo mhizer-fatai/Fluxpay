@@ -87,3 +87,20 @@ export const fetchLink = (id: string) => api<PaymentLinkDto>(`/api/v1/payment-li
 
 export const recordLinkPaid = (id: string, body: { txHash: string; payerAddress: string }) =>
   api<PaymentLinkDto>(`/api/v1/payment-links/${encodeURIComponent(id)}/paid`, { method: 'POST', body: JSON.stringify(body) })
+
+export interface PaymentIntent {
+  intentId: string
+  status: 'created' | 'submitted' | 'confirmed' | 'failed'
+  toAddress: string
+  asset: string
+  amount: string
+  useropHash: string | null
+  txHash: string | null
+  deduped: boolean
+}
+
+export const createPaymentIntent = (body: { idempotencyKey: string; fromAddress: string; toAddress: string; asset: string; amountRaw: string }) =>
+  api<PaymentIntent>('/api/v1/payments/intents', { method: 'POST', body: JSON.stringify(body) })
+
+export const patchPaymentIntent = (intentId: string, body: { status: 'submitted' | 'confirmed' | 'failed'; useropHash?: string; txHash?: string }) =>
+  api<PaymentIntent>(`/api/v1/payments/intents/${encodeURIComponent(intentId)}`, { method: 'PATCH', body: JSON.stringify(body) })
