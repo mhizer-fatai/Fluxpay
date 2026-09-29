@@ -38,8 +38,8 @@ export default function ActivityPage() {
       .finally(() => setLoading(false))
   }, [address])
 
-  const prices = useMemo(() => ({ current: null as Record<string, number> | null }), [])
-  useEffect(() => { void getUsdPrices().then(p => { prices.current = p }) }, [])
+  const [prices, setPrices] = useState<Record<string, number> | null>(null)
+  useEffect(() => { void getUsdPrices().then(setPrices).catch(() => setPrices(null)) }, [])
 
   const assetOptions = useMemo(
     () => ['All assets', ...TOKENS.filter(t => items.some(i => i.token === t.key)).map(t => t.key)],
@@ -64,7 +64,7 @@ export default function ActivityPage() {
     return true
   }), [items, kind, category, assetFilter, dateFilter, search])
 
-  const usdOf = (i: ActivityItem) => (prices.current && i.token ? i.amount * (prices.current[i.token] ?? 0) : 0)
+  const usdOf = (i: ActivityItem) => (prices && i.token ? i.amount * (prices[i.token] ?? 0) : 0)
   const totals = useMemo(() => {
     let sent = 0, received = 0
     for (const i of filtered) {
@@ -73,7 +73,7 @@ export default function ActivityPage() {
       else received += usd
     }
     return { sent, received, count: filtered.length }
-  }, [filtered]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filtered, prices])
 
   const exportCsv = () => {
     const header = 'date,category,type,token,amount,counterparty,tx\n'
