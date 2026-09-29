@@ -18,6 +18,8 @@ const ALLOWED_METHODS = new Set([
   "pimlico_getUserOperationStatus",
   "pm_sponsorUserOperation",
   "pm_validateSponsorshipPolicies",
+  "pm_getPaymasterStubData",
+  "pm_getPaymasterData",
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
