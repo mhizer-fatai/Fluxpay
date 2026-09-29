@@ -30,13 +30,42 @@ interface Persisted {
 function loadPersisted(cacheKey: string): { rows: BalanceRow[]; totalUsd: number } | null {
   try {
     const raw = localStorage.getItem(`fluxpay_balances:${cacheKey}`)
-    if (!raw) return null
+    if (!raw) return loadLatestPersisted()
     const p = JSON.parse(raw) as Persisted
-    if (Date.now() - p.at > PERSIST_TTL_MS) return null
+    if (Date.now() - p.at > PERSIST_TTL_MS) return loadLatestPersisted()
     return {
       rows: p.rows.map(r => ({ ...r, raw: BigInt(r.raw) })),
       totalUsd: p.totalUsd,
     }
+  } catch {
+    return loadLatestPersisted()
+  }
+}
+
+/**
+ * Fallback seed: the freshest persisted balance entry under ANY key, so the UI
+ * shows last-known values immediately even when the address set changed
+ * (e.g. EOA-only cache vs combined EOA+smart key). Corrected by the live sync.
+ */
+function loadLatestPersisted(): { rows: BalanceRow[]; totalUsd: number } | null {
+  try {
+    let best: { at: number; rows: BalanceRow[]; totalUsd: number } | null = null
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (!k || !k.startsWith('fluxpay_balances:')) continue
+      try {
+        const p = JSON.parse(localStorage.getItem(k) ?? '') as Persisted
+        if (Date.now() - p.at > PERSIST_TTL_MS) continue
+        if (!best || p.at > best.at) {
+          best = {
+            at: p.at,
+            rows: p.rows.map(r => ({ ...r, raw: BigInt(r.raw) })),
+            totalUsd: p.totalUsd,
+          }
+        }
+      } catch { /* skip corrupt entries */ }
+    }
+    return best
   } catch {
     return null
   }

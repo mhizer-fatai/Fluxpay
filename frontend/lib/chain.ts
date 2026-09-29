@@ -34,10 +34,19 @@ const rpcRelease = () => {
   }
 }
 const rpcFetch: typeof fetch = (async (input: any, init?: any) => {
+  const withTimeout = async (ms: number): Promise<Response> => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), ms)
+    try {
+      return await fetch(input, { ...init, signal: ctrl.signal })
+    } finally {
+      clearTimeout(timer)
+    }
+  }
   await rpcAcquire()
   let res: Response
   try {
-    res = await fetch(input, init)
+    res = await withTimeout(20_000)
   } catch (e) {
     rpcRelease()
     throw e
@@ -51,7 +60,7 @@ const rpcFetch: typeof fetch = (async (input: any, init?: any) => {
   await new Promise(r => setTimeout(r, 1500))
   await rpcAcquire()
   try {
-    return await fetch(input, init)
+    return await withTimeout(20_000)
   } finally {
     rpcRelease()
   }
