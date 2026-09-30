@@ -5,6 +5,7 @@ import {
   Send, Wallet, type LucideIcon,
 } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { SmartWalletGate } from '@/components/guard'
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
@@ -20,12 +21,15 @@ const quickActions: Array<{ label: string; icon: LucideIcon; href: string; soon?
 ]
 
 export default function DashboardPage() {
-  const { profile, address: profileAddress } = useProfile()
-  const { moneyAddress, smartAddress } = useWallet()
-  const address = moneyAddress ?? profileAddress
-  const { rows, totalUsd, loading } = useBalances(
-    smartAddress && profileAddress ? [profileAddress, smartAddress] : address,
-  )
+  return <SmartWalletGate><DashboardContent /></SmartWalletGate>
+}
+
+function DashboardContent() {
+  const { profile } = useProfile()
+  // Smart account only — the EOA never appears in money UI.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
+  const { rows, totalUsd, loading } = useBalances(address)
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof fetchActivity>>>([])
   const [exporting, setExporting] = useState(false)

@@ -36,9 +36,10 @@ const loadReadIds = (): string[] => {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = useLocation().pathname
   const navigate = useNavigate()
-  const { profile, address: profileAddress } = useProfile()
-  const { moneyAddress } = useWallet()
-  const address = moneyAddress ?? profileAddress
+  const { profile } = useProfile()
+  // Live notifications follow the smart account only — EOA is never subscribed.
+  const { smartAddress } = useWallet()
+  const address = smartAddress
   const activeIndex = nav.findIndex(item => item.href === pathname)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const currentIndex = hoverIndex ?? (activeIndex >= 0 ? activeIndex : 0)

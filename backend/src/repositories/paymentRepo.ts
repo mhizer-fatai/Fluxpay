@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { query } from "../db/pool.js";
 
 export type PaymentStatus = "created" | "submitted" | "confirmed" | "failed";
@@ -44,10 +45,10 @@ export const paymentRepo = {
     if (existing[0]) return { row: existing[0], deduped: true };
     try {
       const rows = await query<PaymentIntentRow>(
-        `INSERT INTO payments (idempotency_key, from_address, to_address, asset, amount, status)
-         VALUES ($1, $2, $3, $4, $5, 'created')
+        `INSERT INTO payments (intent_id, idempotency_key, from_address, to_address, asset, amount, status)
+         VALUES ($1, $2, $3, $4, $5, $6, 'created')
          RETURNING ${COLUMNS}`,
-        [input.idempotencyKey, input.fromAddress.toLowerCase(), input.toAddress.toLowerCase(), input.asset, input.amount],
+        [randomUUID(), input.idempotencyKey, input.fromAddress.toLowerCase(), input.toAddress.toLowerCase(), input.asset, input.amount],
       );
       return { row: rows[0]!, deduped: false };
     } catch (err) {

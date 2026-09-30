@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Download, Search, X, type LucideIcon } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
-import { useProfile } from '@/hooks/profile'
+import { SmartWalletGate } from '@/components/guard'
 import { useWallet } from '@/hooks/useWallet'
 import { fetchActivity, peekActivity, type ActivityItem } from '@/lib/activity'
 import { getUsdPrices, TOKENS } from '@/lib/chain'
@@ -13,9 +13,13 @@ const PAGE_SIZE = 10
 type Kind = 'All' | 'Sent' | 'Received'
 
 export default function ActivityPage() {
-  const { address: profileAddress } = useProfile()
-  const { moneyAddress } = useWallet()
-  const address = moneyAddress ?? profileAddress
+  return <SmartWalletGate><ActivityContent /></SmartWalletGate>
+}
+
+function ActivityContent() {
+  // Smart account only — the EOA never appears in money UI.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
   const [items, setItems] = useState<ActivityItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -70,7 +74,11 @@ export default function ActivityPage() {
     return true
   }), [items, kind, category, assetFilter, dateFilter, search])
 
-  const usdOf = (i: ActivityItem) => (prices && i.token ? i.amount * (prices[i.token] ?? 0) : 0)
+  // Uppercase lookup: tolerates cached items stored before token normalization.
+  const usdOf = (i: ActivityItem) => {
+    if (!prices || !i.token) return 0
+    return i.amount * (prices[(i.token as string).toUpperCase() as typeof i.token] ?? 0)
+  }
   const totals = useMemo(() => {
     let sent = 0, received = 0
     for (const i of filtered) {

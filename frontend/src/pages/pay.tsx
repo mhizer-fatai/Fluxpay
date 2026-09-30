@@ -40,7 +40,8 @@ export default function PayPage() {
   }, [])
 
   const pay = async () => {
-    if (!link || !address) return
+    // Payer identity is the smart account; `address` (EOA) signs invisibly.
+    if (!link || !smartAddress) return
     try {
       setError('')
       const walletClient = await getWalletClient()
@@ -61,7 +62,7 @@ export default function PayPage() {
         onStatus: () => setPhase('paying'),
       })
       // Record on the backend (verifies the tx on-chain, flips pending→paid once).
-      const updated = await recordLinkPaid(link.id, { txHash: result.txHash, payerAddress: (smartAddress ?? address) as string })
+      const updated = await recordLinkPaid(link.id, { txHash: result.txHash, payerAddress: smartAddress as string })
       setLink(updated)
       setTxHash(result.txHash)
       setPhase('done')
@@ -113,10 +114,10 @@ export default function PayPage() {
             {authenticated && (
               <button
                 onClick={pay}
-                disabled={phase !== 'ready'}
+                disabled={phase !== 'ready' || !smartAddress}
                 style={{ marginTop: 20, width: '100%', padding: '12px 0', borderRadius: 12, border: 'none', background: '#D35A44', color: '#fff', fontWeight: 700, cursor: phase === 'ready' ? 'pointer' : 'wait' }}
               >
-                {phase === 'paying' ? 'Paying…' : `Pay ${amountLabel} ${symbol}`}
+                {phase === 'paying' ? 'Paying…' : !smartAddress ? 'Setting up wallet…' : `Pay ${amountLabel} ${symbol}`}
               </button>
             )}
 

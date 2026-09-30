@@ -11,8 +11,9 @@ type Phase = 'form' | 'saving' | 'done'
 export default function OnboardingPage() {
   const navigate = useNavigate()
   const { ready, authenticated, address, smartAddress } = useWallet()
-  const walletAddr = smartAddress ?? address
-  const { completeOnboarding, profile, status } = useProfile()
+  // The account being created is the smart account — EOA is never shown.
+  const walletAddr = smartAddress
+  const { completeOnboarding, profile, status, refresh } = useProfile()
 
   const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
@@ -74,7 +75,29 @@ export default function OnboardingPage() {
 
   // Don't flash the form while profile status is still resolving (or if already onboarded —
   // the redirect effect above will move to /dashboard).
-  if (status === 'loading' || status === 'onboarded') return null
+  if (status === 'loading' || status === 'onboarded' || status === 'anonymous') return null
+
+  // Backend outage: claiming is impossible while down, and the visitor may
+  // already own a username — show retry, never the claim form. The auto-retry
+  // in the profile provider (or the button) flips to onboarded → dashboard
+  // redirect as soon as the server answers.
+  if (status === 'unreachable') {
+    return (
+      <main className="auth-page">
+        <div className="auth-card" style={{ gridTemplateColumns: '1fr' }}>
+          <div className="auth-form" style={{ padding: 32 }}>
+            <p className="auth-welcome">Set up your FluxPay account</p>
+            <h2 style={{ margin: '0 0 12px', fontSize: 22 }}>Connection lost</h2>
+            <p style={{ fontSize: 13, margin: '0 0 18px' }}>
+              We can&apos;t reach the FluxPay servers right now. Your wallet and any existing username are safe —
+              check your connection and try again.
+            </p>
+            <button className="auth-submit" onClick={() => void refresh()}>Retry</button>
+          </div>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main className="auth-page">

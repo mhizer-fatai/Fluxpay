@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useWallet } from './useWallet'
 import { claimUsername, resolveProfile, setTokenProvider, type Profile } from '../lib/api'
 
-type ProfileStatus = 'loading' | 'onboarded' | 'needs_onboarding' | 'anonymous'
+type ProfileStatus = 'loading' | 'onboarded' | 'needs_onboarding' | 'anonymous' | 'unreachable'
 
 interface ProfileCtx {
   status: ProfileStatus
@@ -48,9 +48,11 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         setProfile(null)
         setStatus('needs_onboarding')
       } else {
-        // backend unreachable: keep the user where they are instead of dead-ending
+        // Backend down / 5xx / network blip: this is NOT "no account".
+        // Mark unreachable so guards show a retry screen instead of
+        // bouncing a logged-in user into the onboarding funnel.
         setProfile(null)
-        setStatus('needs_onboarding')
+        setStatus('unreachable')
       }
     }
   }, [authenticated, address, smartAddress])
@@ -59,6 +61,31 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (!ready) return
     void refresh()
   }, [ready, refresh])
+
+  // Transient backend outage: retry with backoff instead of stranding the user.
+  // refresh() flips status itself (onboarded / needs_onboarding on success),
+  // which cleans this loop up; repeated failures just reschedule.
+  useEffect(() => {
+    if (status !== 'unreachable') return
+    let cancelled = false
+    let tries = 0
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const attempt = async () => {
+      if (cancelled) return
+      await refresh()
+      if (cancelled) return
+      tries += 1
+      if (tries < 8) timer = setTimeout(attempt, Math.min(2000 * tries, 15000))
+    }
+    timer = setTimeout(attempt, 2000)
+    const onOnline = () => { if (timer) clearTimeout(timer); void attempt() }
+    window.addEventListener('online', onOnline)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [status, refresh])
 
   // If authenticated but wallet not ready yet, poll briefly before deciding anything.
   useEffect(() => {

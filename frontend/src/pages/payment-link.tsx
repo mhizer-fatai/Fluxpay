@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Copy, ExternalLink, MoreHorizontal, Plus, QrCode as QrCodeIcon, Search, Share2, X } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { SmartWalletGate } from '@/components/guard'
 import { QrCode } from '@/components/qr-code'
-import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
 import { TOKENS, explorerTx, tokenByAddress } from '@/lib/chain'
 import { createPaymentLink, fetchMyLinks, type PaymentLinkDto } from '@/lib/api'
 import { linkUrl } from '@/lib/links'
@@ -19,8 +20,14 @@ const symbolOf = (l: PaymentLinkDto) => tokenByAddress(l.token)?.symbol ?? 'USDC
 const createdTs = (l: PaymentLinkDto) => Math.floor(new Date(l.createdAt).getTime() / 1000)
 
 export default function PaymentLinkPage() {
+  return <SmartWalletGate><PaymentLinkContent /></SmartWalletGate>
+}
+
+function PaymentLinkContent() {
   const navigate = useNavigate()
-  const { address } = useProfile()
+  // Links pay into the smart account — creator identity is smart-only.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
   const [links, setLinks] = useState<PaymentLinkDto[]>([])
   const [loading, setLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)

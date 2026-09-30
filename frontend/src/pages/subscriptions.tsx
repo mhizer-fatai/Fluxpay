@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, CalendarDays, CreditCard, Plus, X } from 'lucide-react'
 import { encodeFunctionData, type Address, type Hash } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
-import { useProfile } from '@/hooks/profile'
+import { SmartWalletGate } from '@/components/guard'
 import { useWallet } from '@/hooks/useWallet'
 import { listStreams, type StreamRow } from '@/lib/streams'
 import { erc20Abi, STREAM_VAULT_ADDRESS, streamVaultAbi, TOKENS, type TokenKey } from '@/lib/chain'
@@ -14,8 +14,13 @@ const PAY_TOKENS: TokenKey[] = ['USDC', 'AUSD', 'WMON', 'WETH']
 const SECONDS_PER_MONTH = 2_592_000
 
 export default function SubscriptionsPage() {
-  const { address } = useProfile()
+  return <SmartWalletGate><SubscriptionsContent /></SmartWalletGate>
+}
+
+function SubscriptionsContent() {
   const { smartAddress, getWalletClient } = useWallet()
+  // Smart account only — no EOA merge. Gate above guarantees non-null.
+  const address = smartAddress as string
   const [streams, setStreams] = useState<StreamRow[]>([])
   const [loading, setLoading] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -25,30 +30,18 @@ export default function SubscriptionsPage() {
   const [form, setForm] = useState({ recipient: '', amount: '', asset: 'USDC' as TokenKey, months: 1 })
 
   const refresh = useCallback(async (force = false) => {
-    if (!address) return
     setLoading(true)
     try {
-      // Smart account first (all new streams live there), EOA merged for legacy.
-      const lists = await Promise.all([
-        smartAddress ? listStreams(smartAddress, 20, force ? { force: true } : undefined) : Promise.resolve([] as StreamRow[]),
-        listStreams(address, 20, force ? { force: true } : undefined),
-      ])
-      const seen = new Set<string>()
-      const merged: StreamRow[] = []
-      for (const s of [...lists[0], ...lists[1]]) {
-        const k = s.id.toString()
-        if (seen.has(k)) continue
-        seen.add(k)
-        merged.push(s)
-      }
-      merged.sort((a, b) => (a.id === b.id ? 0 : a.id < b.id ? 1 : -1))
-      setStreams(merged)
+      // Smart account only — streams live there, EOA is never queried.
+      const list = await listStreams(address, 20, force ? { force: true } : undefined)
+      list.sort((a, b) => (a.id === b.id ? 0 : a.id < b.id ? 1 : -1))
+      setStreams(list)
     } catch {
       setStreams([])
     } finally {
       setLoading(false)
     }
-  }, [address, smartAddress])
+  }, [address])
 
   useEffect(() => {
     void refresh()

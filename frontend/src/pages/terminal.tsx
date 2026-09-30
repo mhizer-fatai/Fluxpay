@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, ExternalLink } from 'lucide-react'
 import type { Address } from 'viem'
+import { ArrowRight, ExternalLink } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { SmartWalletGate } from '@/components/guard'
 import { useProfile } from '@/hooks/profile'
 import { useBalances } from '@/hooks/useBalances'
 import { useWallet } from '@/hooks/useWallet'
@@ -23,9 +24,14 @@ const HELP = `Available commands:
   help                          — this message`
 
 export default function TerminalPage() {
+  return <SmartWalletGate><TerminalContent /></SmartWalletGate>
+}
+
+function TerminalContent() {
   const { address } = useProfile()
-  const { getWalletClient } = useWallet()
-  const { rows, refresh } = useBalances(address)
+  // Balances are smart-only; `address` (EOA) below signs userOps invisibly.
+  const { smartAddress, getWalletClient } = useWallet()
+  const { rows, refresh } = useBalances(smartAddress)
   const [input, setInput] = useState('')
   const [lines, setLines] = useState<Line[]>([
     { kind: 'out', text: 'FluxPay Terminal — connected to Monad testnet. Type "help" for commands.' },

@@ -27,6 +27,27 @@ async function pimlicoFetch(input: any, init?: any): Promise<Response> {
 
 const publicClient = createPublicClient({ chain: monadTestnet, transport: http() })
 
+function makePimlicoClient() {
+  return createPimlicoClient({
+    transport: http(PIMLICO_PROXY_URL, { fetchFn: pimlicoFetch as typeof fetch }),
+    entryPoint: { address: ENTRYPOINT_V06, version: '0.6' },
+  })
+}
+
+/**
+ * Single-shot userOp receipt lookup — returns null while the bundler hasn't
+ * included the operation yet. Used by the "Check status" recovery path when
+ * the initial confirmation wait timed out (the tx may still land later).
+ */
+export async function getUserOpReceipt(userOpHash: Hash) {
+  const pimlicoClient = makePimlicoClient()
+  try {
+    return await pimlicoClient.getUserOperationReceipt({ hash: userOpHash })
+  } catch {
+    return null
+  }
+}
+
 /**
  * Wrap a Privy viem wallet client (embedded EOA signer) as a viem account that can
  * sign UserOperation hashes for an ERC-4337 smart account.
@@ -75,6 +96,8 @@ export async function sendGasless(opts: {
   ownerAddress: Address
   calls: GaslessCall[]
   onStatus?: (status: 'building' | 'signing' | 'submitted' | 'confirmed') => void
+  /** Fired the moment the userOp hash exists — so the UI can show a submitted state immediately. */
+  onUserOpHash?: (hash: Hash) => void
 }): Promise<{ userOpHash: Hash; txHash: Hash }> {
   const owner = privySignerToAccount(opts.walletClient, opts.ownerAddress)
 
@@ -114,6 +137,7 @@ export async function sendGasless(opts: {
   // Surfaced immediately: with this hash anyone can look the operation up in
   // Pimlico's User Operation Logs or query its receipt directly.
   console.info('[gasless] userOp submitted:', userOpHash)
+  opts.onUserOpHash?.(userOpHash)
 
   // Bounded receipt wait: the testnet bundler can take minutes to include a userOp.
   // Critical: a timeout does NOT cancel the operation — it may still land later,

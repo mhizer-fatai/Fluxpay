@@ -2,18 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Check, Clipboard, ExternalLink, QrCode } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { SmartWalletGate } from '@/components/guard'
 import { Dropdown } from '@/components/dropdown'
 import { useProfile } from '@/hooks/profile'
 import { useBalances } from '@/hooks/useBalances'
 import { useWallet } from '@/hooks/useWallet'
-import { buildSettleCalls, sendGasless } from '@/lib/gasless'
+import { buildSettleCalls, getUserOpReceipt, sendGasless } from '@/lib/gasless'
 import { fetchActivity } from '@/lib/activity'
 import { getUsdPrices, TOKENS, type TokenKey } from '@/lib/chain'
 import { resolveUsernameApi, createPaymentIntent, patchPaymentIntent } from '@/lib/api'
 import { money, shortAddr } from '@/lib/format'
-import { EXPLORER_URL } from '@/lib/chain'
+import { EXPLORER_URL, publicClient } from '@/lib/chain'
 
-type Step = 'form' | 'confirm' | 'sending' | 'success'
+type Step = 'form' | 'confirm' | 'sending' | 'pending' | 'success'
 
 const SENDABLE: TokenKey[] = ['USDC', 'KUSDC', 'AUSD', 'WMON', 'WETH', 'MON']
 
@@ -85,10 +86,15 @@ function SlideToSend({ onComplete, disabled }: { onComplete: () => void; disable
 }
 
 export default function SendPage() {
+  return <SmartWalletGate><SendContent /></SmartWalletGate>
+}
+
+function SendContent() {
   const { address } = useProfile()
   const { smartAddress, getWalletClient } = useWallet()
-  const { rows } = useBalances(address)
-  const { rows: smartRows, refresh: refreshSmart } = useBalances(smartAddress)
+  // Smart account only — balances, spend, and QRs never touch the EOA.
+  // (The EOA remains the invisible signer for userOps inside sendGasless.)
+  const { rows, refresh: refreshSmart } = useBalances(smartAddress)
 
   const [step, setStep] = useState<Step>('form')
   const [assetSym, setAssetSym] = useState<TokenKey>('USDC')
@@ -101,10 +107,22 @@ export default function SendPage() {
   const [resolvedTo, setResolvedTo] = useState<string | null>(null)
   const [copiedSmart, setCopiedSmart] = useState(false)
   const [recents, setRecents] = useState<Array<{ addr: string; last: string }>>([])
+  // Confirmation tracking: userOp hash (exists the moment the bundler accepts),
+  // elapsed seconds while confirming, and the on-chain receipt for "View Receipt".
+  const [intentId, setIntentId] = useState<string | null>(null)
+  const [userOpHash, setUserOpHash] = useState<string | null>(null)
+  // Ref mirror: the confirmSend closure outlives re-renders, so the catch block
+  // reads the ref (current) instead of stale state when deciding recovery.
+  const userOpHashRef = useRef<string | null>(null)
+  const [confirmSecs, setConfirmSecs] = useState(0)
+  const [checking, setChecking] = useState(false)
+  const [showReceipt, setShowReceipt] = useState(false)
+  const [receiptLoading, setReceiptLoading] = useState(false)
+  const [receipt, setReceipt] = useState<{ status: string; blockNumber: string; gasUsed: string } | null>(null)
 
   // All sends go from the smart account (sponsored, invisible to the user).
-  const spendAddress = smartAddress ?? address
-  const spendRows = smartAddress ? smartRows : rows
+  const spendAddress = smartAddress as string
+  const spendRows = rows
 
   const asset = TOKENS.find(t => t.key === assetSym)!
   const balanceRow = spendRows.find(r => r.key === assetSym)
@@ -135,7 +153,56 @@ export default function SendPage() {
   const paste = async () => {
     try { const text = await navigator.clipboard.readText(); if (text) setRecipient(text.trim()) } catch { /* ignore */ }
   }
-  const reset = () => { setStep('form'); setRecipient(''); setAmount(''); setTxHash(null); setResolvedTo(null); setError('') }
+  const reset = () => {
+    setStep('form'); setRecipient(''); setAmount(''); setTxHash(null); setResolvedTo(null); setError('')
+    setIntentId(null); setUserOpHash(null); userOpHashRef.current = null; setConfirmSecs(0); setReceipt(null); setShowReceipt(false); setBusy('')
+  }
+
+  // Elapsed-time ticker while waiting for on-chain confirmation.
+  useEffect(() => {
+    if (step !== 'sending' || !userOpHash) return
+    const t = setInterval(() => setConfirmSecs(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [step, userOpHash])
+
+  const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
+  /** Recovery path: the confirmation wait timed out but the tx may still land. Never resend blindly. */
+  const checkStatus = async () => {
+    if (!userOpHash) return
+    setChecking(true)
+    setError('')
+    try {
+      const r = await getUserOpReceipt(userOpHash as `0x${string}`)
+      if (!r) {
+        setError('Still pending with the bundler — wait a bit and check again. Do not resend: this transaction may still land.')
+        return
+      }
+      const tx = r.receipt.transactionHash
+      if (intentId) void patchPaymentIntent(intentId, { status: 'confirmed', txHash: tx }).catch(() => {})
+      setTxHash(tx)
+      void refreshSmart()
+      setBusy('')
+      setStep('success')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  /** On-demand on-chain receipt for the "View Receipt" panel. */
+  const loadReceipt = async () => {
+    if (receipt || !txHash) { setShowReceipt(v => !v); return }
+    setReceiptLoading(true)
+    try {
+      const r = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` })
+      setReceipt({ status: r.status, blockNumber: r.blockNumber.toString(), gasUsed: r.gasUsed.toString() })
+      setShowReceipt(true)
+    } catch {
+      setError('Receipt not available yet — try again in a moment')
+    } finally {
+      setReceiptLoading(false)
+    }
+  }
 
   const resolveRecipient = async (): Promise<string | null> => {
     const v = recipient.trim()
@@ -180,6 +247,7 @@ export default function SendPage() {
         amountRaw: rawAmount,
       })
       intentId = intent.intentId
+      setIntentId(intent.intentId)
       if (intent.status === 'confirmed') {
         setTxHash(intent.txHash)
         setBusy('')
@@ -190,17 +258,26 @@ export default function SendPage() {
         ...loadPending().filter(p => p.intentId !== intent.intentId),
         { key: idempotencyKey, intentId: intent.intentId, to, asset: asset.key, amount: rawAmount, at: Date.now() },
       ])
+      // Move to the progress screen BEFORE touching the wallet: the user always
+      // sees live status (signing → submitted → confirming) instead of a dead button.
+      setStep('sending')
+      setUserOpHash(null)
+      userOpHashRef.current = null
+      setConfirmSecs(0)
+      setReceipt(null)
+      setShowReceipt(false)
       const calls = buildSettleCalls({ token: asset, amountHuman: amt, to: to as `0x${string}` })
       const result = await sendGasless({
         walletClient,
         ownerAddress: address as `0x${string}`,
         calls,
         onStatus: s => {
-          setBusy(s === 'signing' ? 'Confirm in your wallet…' : s === 'submitted' ? 'Sending…' : 'Confirming…')
+          setBusy(s === 'signing' ? 'Confirm in your wallet…' : s === 'submitted' ? 'Submitted — waiting for on-chain confirmation…' : 'Confirming on Monad…')
           if (s === 'submitted' && intentId) {
             void patchPaymentIntent(intentId, { status: 'submitted' }).catch(() => {})
           }
         },
+        onUserOpHash: h => { userOpHashRef.current = h; setUserOpHash(h) },
       })
       if (intentId) {
         savePending(loadPending().filter(p => p.intentId !== intentId))
@@ -211,8 +288,19 @@ export default function SendPage() {
       setBusy('')
       setStep('success')
     } catch (e) {
-      const err = e as Error & { shortMessage?: string }
-      setError(err.shortMessage || err.message || 'Send failed — please try again')
+      const err = e as Error & { shortMessage?: string; body?: { error?: string; message?: string } }
+      const msg = err.shortMessage || err.message || 'Send failed — please try again'
+      // Confirmation timeout ≠ failure: the userOp is with the bundler and may
+      // still land. Park on the recovery screen (with the userOp hash) instead
+      // of bouncing back to confirm, where a retry could double-send.
+      if (/still waiting on confirmation/i.test(msg) && userOpHashRef.current) {
+        setBusy('')
+        setError('')
+        setStep('pending')
+        return
+      }
+      const detail = err.body?.message || err.body?.error
+      setError(detail ? `${msg} (${detail})` : msg)
       setBusy('')
       setStep('confirm')
     }
@@ -243,14 +331,12 @@ export default function SendPage() {
                 <div><strong>FluxPay Wallet</strong><small>{spendAddress ?? 'connecting…'}</small></div>
                 <span className="sn-wallet-bal">{balance.toLocaleString('en-US', { maximumFractionDigits: 4 })} {asset.symbol}</span>
               </div>
-              {smartAddress && (
-                <div className="sn-input-row sn-input-row-btns">
-                  <button className="sn-inline" onClick={() => { navigator.clipboard?.writeText(smartAddress).catch(() => {}); setCopiedSmart(true); setTimeout(() => setCopiedSmart(false), 1500) }}>
-                    {copiedSmart ? 'Copied' : 'Copy wallet address'}
-                  </button>
-                </div>
-              )}
-              {smartAddress && balance === 0 && (
+              <div className="sn-input-row sn-input-row-btns">
+                <button className="sn-inline" onClick={() => { if (spendAddress) navigator.clipboard?.writeText(spendAddress).catch(() => {}); setCopiedSmart(true); setTimeout(() => setCopiedSmart(false), 1500) }}>
+                  {copiedSmart ? 'Copied' : 'Copy wallet address'}
+                </button>
+              </div>
+              {balance === 0 && (
                 <p className="sn-hint">Send funds to this address once to start using FluxPay.</p>
               )}
             </div>
@@ -305,24 +391,68 @@ export default function SendPage() {
 
           {step === 'sending' && (
             <div className="sn-step">
-              <h2>Sending…</h2>
+              <h2>{userOpHash ? 'Confirming…' : 'Sending…'}</h2>
               <p className="sn-hint">{busy || 'Waiting for confirmation on Monad…'}</p>
+              <div className="sn-summary">
+                <div className="sn-sum-row"><span>Amount</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
+                {userOpHash && (
+                  <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{shortAddr(userOpHash)}</strong></div>
+                )}
+                {userOpHash && (
+                  <div className="sn-sum-row"><span>Elapsed</span><strong>{fmtElapsed(confirmSecs)}</strong></div>
+                )}
+              </div>
+              {userOpHash
+                ? <p className="sn-hint">Submitted to the bundler — your funds are safe. You can leave this page; the result will appear in Activity.</p>
+                : <p className="sn-hint">Waiting for your wallet approval…</p>}
+            </div>
+          )}
+
+          {step === 'pending' && (
+            <div className="sn-step">
+              <h2>Submitted — status unknown</h2>
+              <p className="sn-warning">Confirmation is taking longer than usual, but your transaction was submitted and may still land. <strong>Do not send again</strong> — that could transfer twice.</p>
+              <div className="sn-summary">
+                <div className="sn-sum-row"><span>Amount</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
+                {userOpHash && (
+                  <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{shortAddr(userOpHash)}</strong></div>
+                )}
+              </div>
+              {error && <p style={{ color: '#ef4444', fontSize: 13 }}>{error}</p>}
+              <div className="sn-actions">
+                <button className="ov-btn primary" onClick={checkStatus} disabled={checking}>{checking ? 'Checking…' : 'Check status'}</button>
+                <Link className="ov-btn" to="/activity">View Activity</Link>
+              </div>
             </div>
           )}
 
           {step === 'success' && (
             <div className="sn-step sn-success">
               <span className="sn-success-icon"><Check size={22} /></span>
-              <h2>Transfer Sent</h2>
+              <h2>Transfer confirmed</h2>
               <p className="sn-success-amount">{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</p>
-              <p className="sn-success-sub">confirmed on Monad testnet.</p>
+              <p className="sn-success-sub">sent to {resolvedTo ? shortAddr(resolvedTo) : recipient} · confirmed on Monad Testnet.</p>
               <div className="sn-summary">
                 <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
-                <div className="sn-sum-row"><span>Transaction ID</span><strong style={{ wordBreak: 'break-all' }}>{txHash ? shortAddr(txHash) : '—'}</strong></div>
+                <div className="sn-sum-row"><span>Transaction</span><strong style={{ wordBreak: 'break-all' }}>{txHash ? shortAddr(txHash) : '—'}</strong></div>
                 <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
               </div>
               <div className="sn-actions">
-                {txHash && <a className="ov-btn" href={`${EXPLORER_URL}/tx/${txHash}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> View Transaction</a>}
+                <button className="ov-btn" onClick={loadReceipt} disabled={receiptLoading}>{receiptLoading ? 'Loading…' : showReceipt ? 'Hide Receipt' : 'View Receipt'}</button>
+                {txHash && <a className="ov-btn" href={`${EXPLORER_URL}/tx/${txHash}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Explorer</a>}
+              </div>
+              {showReceipt && receipt && (
+                <div className="sn-summary" style={{ marginTop: 12 }}>
+                  <div className="sn-sum-row"><span>Status</span><strong style={{ color: receipt.status === 'success' ? '#16a34a' : '#ef4444' }}>{receipt.status === 'success' ? 'Success' : 'Reverted'}</strong></div>
+                  <div className="sn-sum-row"><span>Block</span><strong>#{Number(receipt.blockNumber).toLocaleString('en-US')}</strong></div>
+                  <div className="sn-sum-row"><span>Gas used</span><strong>{Number(receipt.gasUsed).toLocaleString('en-US')}</strong></div>
+                  {userOpHash && <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{shortAddr(userOpHash)}</strong></div>}
+                  {txHash && <div className="sn-sum-row"><span>Tx hash</span><strong style={{ wordBreak: 'break-all', fontSize: 12 }}>{txHash}</strong></div>}
+                </div>
+              )}
+              <div className="sn-actions" style={{ marginTop: 12 }}>
                 <button className="ov-btn" onClick={reset}>Send Again</button>
                 <Link className="ov-btn primary" to="/wallet">Back to Wallet</Link>
               </div>

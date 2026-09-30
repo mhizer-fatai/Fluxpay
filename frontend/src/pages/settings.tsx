@@ -38,8 +38,9 @@ const loadPrefs = () => {
 export default function SettingsPage() {
   const navigate = useNavigate()
   const { profile, refresh } = useProfile()
-  const { address, moneyAddress, logout, user } = useWallet()
-  const walletAddr = moneyAddress ?? address
+  const { address, smartAddress, logout, user } = useWallet()
+  // The only wallet the user ever sees is the smart account.
+  const walletAddr = smartAddress
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -59,10 +60,12 @@ export default function SettingsPage() {
   const providers = [user?.google ? 'Google' : null, user?.twitter ? 'X / Twitter' : null, user?.apple ? 'Apple' : null, user?.email ? 'Email' : null, user?.wallet ? 'Wallet' : null].filter(Boolean) as string[]
 
   const save = async () => {
-    if (!address || !name.trim()) return
+    // Save against the resolved profile row (smart-first), never the raw EOA.
+    const rowAddress = profile?.address ?? address
+    if (!rowAddress || !name.trim()) return
     setSaving(true)
     try {
-      await saveProfile({ address, fullName: name.trim(), email: email.trim() || undefined })
+      await saveProfile({ address: rowAddress, fullName: name.trim(), email: email.trim() || undefined })
       await refresh()
       setEditing(false)
       setSavedMsg('Profile saved')

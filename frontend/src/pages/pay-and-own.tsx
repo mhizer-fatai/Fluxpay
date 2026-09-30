@@ -2,14 +2,21 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, CalendarDays, Percent, TrendingUp, Wallet } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
-import { useProfile } from '@/hooks/profile'
+import { SmartWalletGate } from '@/components/guard'
+import { useWallet } from '@/hooks/useWallet'
 import { listStreams } from '@/lib/streams'
 import { money, shortAddr, timeAgo } from '@/lib/format'
 
 const PREFS_KEY = 'fluxpay_prefs'
 
 export default function PayAndOwnPage() {
-  const { address } = useProfile()
+  return <SmartWalletGate><PayAndOwnContent /></SmartWalletGate>
+}
+
+function PayAndOwnContent() {
+  // Streams live in the smart account — EOA is never queried.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [loading, setLoading] = useState(false)
   const [editing, setEditing] = useState(false)

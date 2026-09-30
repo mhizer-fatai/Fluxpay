@@ -89,6 +89,16 @@ interface BackendEvent {
 
 const num = (v: unknown) => (typeof v === 'number' ? v : Number(v ?? 0))
 
+/**
+ * Backend token labels come from server config keys ('usdc', 'weth', …) while
+ * the frontend prices/TOKENS use uppercase keys ('USDC'). Normalize at the
+ * boundary so USD math, decimals, and asset filters all match.
+ */
+const tok = (label: unknown): { token: TokenKey | null; decimals: number } => {
+  const meta = typeof label === 'string' ? TOKENS.find(t => t.key === label.toUpperCase()) : undefined
+  return { token: meta?.key ?? null, decimals: meta?.decimals ?? 18 }
+}
+
 async function fetchBackendActivity(address: string): Promise<ActivityItem[]> {
   const addr = address.toLowerCase()
   let rows: BackendEvent[] = []
@@ -108,31 +118,31 @@ async function fetchBackendActivity(address: string): Promise<ActivityItem[]> {
       case 'payment_settled': {
         const to = String(p.to ?? '').toLowerCase()
         const kind = to === addr ? 'received' : 'sent'
-        items.push({ ...base, kind, category: 'Payment', token: (p.tokenLabel as TokenKey) ?? null, tokenAddress: (p.token as string) ?? null, amount: num(p.amount), decimals: (p.tokenLabel as string) === 'USDC' || (p.tokenLabel as string) === 'AUSD' ? 6 : 18, counterparty: kind === 'received' ? String(p.from ?? '') : String(p.to ?? ''), event: 'PaymentSettled' })
+        items.push({ ...base, kind, category: 'Payment', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: kind === 'received' ? String(p.from ?? '') : String(p.to ?? ''), event: 'PaymentSettled' })
         break
       }
       case 'batch_settled':
-        items.push({ ...base, kind: 'sent', category: 'Payment', token: (p.tokenLabel as TokenKey) ?? null, tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: `${p.count ?? '?'} recipients`, event: 'BatchSettled' })
+        items.push({ ...base, kind: 'sent', category: 'Payment', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: `${p.count ?? '?'} recipients`, event: 'BatchSettled' })
         break
       case 'username_registered':
         items.push({ ...base, kind: 'received', category: 'Account', counterparty: `@${String(p.username ?? '')}`, event: 'UsernameRegistered' })
         break
       case 'stream_opened': {
         const isOwner = String(p.owner ?? '').toLowerCase() === addr
-        items.push({ ...base, kind: isOwner ? 'sent' : 'received', category: 'Stream', token: (p.tokenLabel as TokenKey) ?? null, tokenAddress: (p.token as string) ?? null, counterparty: isOwner ? String(p.recipient ?? '') : String(p.owner ?? ''), event: 'StreamOpened' })
+        items.push({ ...base, kind: isOwner ? 'sent' : 'received', category: 'Stream', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, counterparty: isOwner ? String(p.recipient ?? '') : String(p.owner ?? ''), event: 'StreamOpened' })
         break
       }
       case 'stream_withdrawn': {
         const mine = String(p.recipient ?? '').toLowerCase() === addr
-        items.push({ ...base, kind: mine ? 'received' : 'sent', category: 'Stream', token: (p.tokenLabel as TokenKey) ?? null, tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: mine ? 'stream' : String(p.recipient ?? ''), event: 'StreamWithdrawn' })
+        items.push({ ...base, kind: mine ? 'received' : 'sent', category: 'Stream', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: mine ? 'stream' : String(p.recipient ?? ''), event: 'StreamWithdrawn' })
         break
       }
       case 'stream_topup':
-        items.push({ ...base, kind: 'sent', category: 'Stream', token: (p.tokenLabel as TokenKey) ?? null, tokenAddress: (p.token as string) ?? null, amount: num(p.amount), event: 'StreamTopUp' })
+        items.push({ ...base, kind: 'sent', category: 'Stream', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(p.amount), event: 'StreamTopUp' })
         break
       case 'stream_cancelled': {
         const isRecipient = String(p.recipient ?? '').toLowerCase() === addr
-        items.push({ ...base, kind: 'received', category: 'Stream', token: (p.tokenLabel as TokenKey) ?? null, tokenAddress: (p.token as string) ?? null, amount: num(isRecipient ? p.paidOut : p.refunded), counterparty: isRecipient ? 'stream' : String(p.recipient ?? ''), event: 'StreamCancelled' })
+        items.push({ ...base, kind: 'received', category: 'Stream', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(isRecipient ? p.paidOut : p.refunded), counterparty: isRecipient ? 'stream' : String(p.recipient ?? ''), event: 'StreamCancelled' })
         break
       }
       case 'stream_paused':
@@ -140,13 +150,13 @@ async function fetchBackendActivity(address: string): Promise<ActivityItem[]> {
         items.push({ ...base, kind: 'received', category: 'Stream', event: r.type === 'stream_paused' ? 'StreamPaused' : 'StreamResumed' })
         break
       case 'link_created':
-        items.push({ ...base, kind: 'sent', category: 'Payment Link', token: (p.tokenLabel as TokenKey) ?? null, tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: 'escrow', event: 'LinkCreated' })
+        items.push({ ...base, kind: 'sent', category: 'Payment Link', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: 'escrow', event: 'LinkCreated' })
         break
       case 'link_claimed':
-        items.push({ ...base, kind: 'received', category: 'Payment Link', token: (p.tokenLabel as TokenKey) ?? null, tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: String(p.claimer ?? ''), event: 'LinkClaimed' })
+        items.push({ ...base, kind: 'received', category: 'Payment Link', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: String(p.claimer ?? ''), event: 'LinkClaimed' })
         break
       case 'link_refunded':
-        items.push({ ...base, kind: 'received', category: 'Payment Link', token: (p.tokenLabel as TokenKey) ?? null, amount: num(p.amount), event: 'LinkRefunded' })
+        items.push({ ...base, kind: 'received', category: 'Payment Link', ...tok(p.tokenLabel), amount: num(p.amount), event: 'LinkRefunded' })
         break
       case 'wrap':
         items.push({ ...base, kind: 'sent', category: 'Swap', token: 'MON', amount: num(p.amount), counterparty: 'WMON', event: 'Wrap' })
