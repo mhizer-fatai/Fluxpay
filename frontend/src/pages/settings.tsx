@@ -38,7 +38,9 @@ const loadPrefs = () => {
 export default function SettingsPage() {
   const navigate = useNavigate()
   const { profile, refresh } = useProfile()
-  const { address, logout, user } = useWallet()
+  const { address, smartAddress, logout, user } = useWallet()
+  // The only wallet the user ever sees is the smart account.
+  const walletAddr = smartAddress
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -58,10 +60,12 @@ export default function SettingsPage() {
   const providers = [user?.google ? 'Google' : null, user?.twitter ? 'X / Twitter' : null, user?.apple ? 'Apple' : null, user?.email ? 'Email' : null, user?.wallet ? 'Wallet' : null].filter(Boolean) as string[]
 
   const save = async () => {
-    if (!address || !name.trim()) return
+    // Save against the resolved profile row (smart-first), never the raw EOA.
+    const rowAddress = profile?.address ?? address
+    if (!rowAddress || !name.trim()) return
     setSaving(true)
     try {
-      await saveProfile({ address, fullName: name.trim(), email: email.trim() || undefined })
+      await saveProfile({ address: rowAddress, fullName: name.trim(), email: email.trim() || undefined })
       await refresh()
       setEditing(false)
       setSavedMsg('Profile saved')
@@ -105,7 +109,7 @@ export default function SettingsPage() {
                 <Row title="Full Name"><strong>{displayName}</strong></Row>
                 <Row title="Email"><strong>{profile?.email || '—'}</strong></Row>
                 <Row title="Username"><strong>{profile?.username ? `@${profile.username}` : '—'}</strong></Row>
-                <Row title="Wallet"><strong>{address ? shortAddr(address) : '—'}</strong></Row>
+                <Row title="Wallet"><strong>{walletAddr ? shortAddr(walletAddr) : '—'}</strong></Row>
                 <Row title="Login provider" desc="Managed by Privy authentication"><span className="st-chip">{providers[0] ?? 'Privy'}</span></Row>
                 <div className="st-actions">
                   <button className="ov-btn primary" onClick={() => { setName(profile?.fullName || ''); setEmail(profile?.email || ''); setEditing(true) }}>Edit Profile</button>
@@ -118,14 +122,14 @@ export default function SettingsPage() {
       </Section>
 
       <Section icon={Wallet} title="Wallet">
-        <div className="st-sub">Primary Wallet (Privy-managed)</div>
+        <div className="st-sub">FluxPay smart wallet</div>
         <div className="st-wallet">
-          <span className="st-wallet-addr">{address ?? 'connecting…'}</span>
+          <span className="st-wallet-addr">{walletAddr ?? 'connecting…'}</span>
           <span className="st-chip">Monad</span>
           <span className="st-chip st-chip-solid">Primary</span>
           <div className="st-wallet-actions">
-            <button className="st-icon-action" aria-label="Copy address" onClick={() => { if (address) { navigator.clipboard?.writeText(address).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500) } }}><Copy size={14} /></button>
-            {address && <a className="st-icon-action" href={`${EXPLORER_URL}/address/${address}`} target="_blank" rel="noreferrer" aria-label="View on explorer"><ExternalLink size={14} /></a>}
+            <button className="st-icon-action" aria-label="Copy address" onClick={() => { if (walletAddr) { navigator.clipboard?.writeText(walletAddr).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500) } }}><Copy size={14} /></button>
+            {walletAddr && <a className="st-icon-action" href={`${EXPLORER_URL}/address/${walletAddr}`} target="_blank" rel="noreferrer" aria-label="View on explorer"><ExternalLink size={14} /></a>}
           </div>
         </div>
         {copied && <small>Copied to clipboard</small>}

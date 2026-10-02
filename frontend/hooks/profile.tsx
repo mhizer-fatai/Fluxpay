@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useWallet } from './useWallet'
-import { claimUsername, fetchProfile, setTokenProvider, type Profile } from '../lib/api'
+import { claimUsername, resolveProfile, setTokenProvider, type Profile } from '../lib/api'
 
-type ProfileStatus = 'loading' | 'onboarded' | 'needs_onboarding' | 'anonymous'
+type ProfileStatus = 'loading' | 'onboarded' | 'needs_onboarding' | 'anonymous' | 'unreachable'
 
 interface ProfileCtx {
   status: ProfileStatus
@@ -15,7 +15,7 @@ interface ProfileCtx {
 const Ctx = createContext<ProfileCtx | null>(null)
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
-  const { ready, authenticated, address, getAccessToken } = useWallet()
+  const { ready, authenticated, address, smartAddress, getAccessToken } = useWallet()
   const [status, setStatus] = useState<ProfileStatus>('loading')
   const [profile, setProfile] = useState<Profile | null>(null)
 
@@ -23,6 +23,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     setTokenProvider(getAccessToken)
   }, [getAccessToken])
 
+  // Identity lives on the EOA row; money routes to the smart account row when present.
   const refresh = useCallback(async () => {
     if (!authenticated) {
       setStatus('anonymous')
@@ -36,7 +37,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     }
     setStatus('loading')
     try {
-      const p = await fetchProfile(address)
+      // One call across candidates: smart-account profile first, legacy EOA row second.
+      const candidates = [smartAddress, address].filter((a): a is string => Boolean(a))
+      const p = await resolveProfile(candidates)
       setProfile(p)
       setStatus('onboarded')
     } catch (err) {
@@ -45,17 +48,44 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         setProfile(null)
         setStatus('needs_onboarding')
       } else {
-        // backend unreachable: keep the user where they are instead of dead-ending
+        // Backend down / 5xx / network blip: this is NOT "no account".
+        // Mark unreachable so guards show a retry screen instead of
+        // bouncing a logged-in user into the onboarding funnel.
         setProfile(null)
-        setStatus('needs_onboarding')
+        setStatus('unreachable')
       }
     }
-  }, [authenticated, address])
+  }, [authenticated, address, smartAddress])
 
   useEffect(() => {
     if (!ready) return
     void refresh()
   }, [ready, refresh])
+
+  // Transient backend outage: retry with backoff instead of stranding the user.
+  // refresh() flips status itself (onboarded / needs_onboarding on success),
+  // which cleans this loop up; repeated failures just reschedule.
+  useEffect(() => {
+    if (status !== 'unreachable') return
+    let cancelled = false
+    let tries = 0
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const attempt = async () => {
+      if (cancelled) return
+      await refresh()
+      if (cancelled) return
+      tries += 1
+      if (tries < 8) timer = setTimeout(attempt, Math.min(2000 * tries, 15000))
+    }
+    timer = setTimeout(attempt, 2000)
+    const onOnline = () => { if (timer) clearTimeout(timer); void attempt() }
+    window.addEventListener('online', onOnline)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [status, refresh])
 
   // If authenticated but wallet not ready yet, poll briefly before deciding anything.
   useEffect(() => {
@@ -73,13 +103,16 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
   const completeOnboarding = useCallback(
     async (args: { username: string; fullName: string; email?: string }) => {
-      if (!address) throw new Error('wallet_not_ready')
-      const p = await claimUsername({ ...args, address })
+      // Bind the username to the smart (money) account when known so payments
+      // resolve there; otherwise fall back to the EOA.
+      const bindAddress = smartAddress ?? address
+      if (!bindAddress) throw new Error('wallet_not_ready')
+      const p = await claimUsername({ ...args, address: bindAddress })
       setProfile(p)
       setStatus('onboarded')
       return p
     },
-    [address],
+    [address, smartAddress],
   )
 
   return <Ctx.Provider value={{ status, profile, address, refresh, completeOnboarding }}>{children}</Ctx.Provider>

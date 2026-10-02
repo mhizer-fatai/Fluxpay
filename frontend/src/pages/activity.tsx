@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Download, Search, X, type LucideIcon } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
-import { useProfile } from '@/hooks/profile'
-import { fetchActivity, type ActivityItem } from '@/lib/activity'
+import { SmartWalletGate } from '@/components/guard'
+import { useWallet } from '@/hooks/useWallet'
+import { fetchActivity, peekActivity, type ActivityItem } from '@/lib/activity'
 import { getUsdPrices, TOKENS } from '@/lib/chain'
 import { money, shortAddr, timeAgo } from '@/lib/format'
 import { EXPLORER_URL } from '@/lib/chain'
@@ -12,13 +13,20 @@ const PAGE_SIZE = 10
 type Kind = 'All' | 'Sent' | 'Received'
 
 export default function ActivityPage() {
-  const { address } = useProfile()
+  return <SmartWalletGate><ActivityContent /></SmartWalletGate>
+}
+
+function ActivityContent() {
+  // Smart account only — the EOA never appears in money UI.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
   const [items, setItems] = useState<ActivityItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [visible, setVisible] = useState(PAGE_SIZE)
   const [search, setSearch] = useState('')
   const [kind, setKind] = useState<Kind>('All')
+  const [category, setCategory] = useState('All categories')
   const [dateFilter, setDateFilter] = useState('All time')
   const [assetFilter, setAssetFilter] = useState('All assets')
   const [detail, setDetail] = useState<ActivityItem | null>(null)
@@ -26,16 +34,22 @@ export default function ActivityPage() {
 
   useEffect(() => {
     if (!address) return
-    setLoading(true)
+    const peeked = peekActivity(address)
+    if (peeked && peeked.length > 0) {
+      setItems(peeked)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     setError('')
-    fetchActivity(address, 40_000)
+    fetchActivity(address)
       .then(setItems)
       .catch(e => setError((e as Error).message || 'Failed to load activity'))
       .finally(() => setLoading(false))
   }, [address])
 
-  const prices = useMemo(() => ({ current: null as Record<string, number> | null }), [])
-  useEffect(() => { void getUsdPrices().then(p => { prices.current = p }) }, [])
+  const [prices, setPrices] = useState<Record<string, number> | null>(null)
+  useEffect(() => { void getUsdPrices().then(setPrices).catch(() => setPrices(null)) }, [])
 
   const assetOptions = useMemo(
     () => ['All assets', ...TOKENS.filter(t => items.some(i => i.token === t.key)).map(t => t.key)],
@@ -45,6 +59,7 @@ export default function ActivityPage() {
   const filtered = useMemo(() => items.filter(i => {
     if (kind === 'Sent' && i.kind !== 'sent') return false
     if (kind === 'Received' && i.kind !== 'received') return false
+    if (category !== 'All categories' && i.category !== category) return false
     if (assetFilter !== 'All assets' && i.token !== assetFilter) return false
     if (dateFilter !== 'All time') {
       const ageDays = (Date.now() / 1000 - i.ts) / 86400
@@ -54,12 +69,16 @@ export default function ActivityPage() {
     }
     if (search) {
       const q = search.toLowerCase()
-      if (!`${i.hash} ${i.token ?? ''} ${i.counterparty} ${i.event}`.toLowerCase().includes(q)) return false
+      if (!`${i.hash} ${i.token ?? ''} ${i.counterparty} ${i.event} ${i.category}`.toLowerCase().includes(q)) return false
     }
     return true
-  }), [items, kind, assetFilter, dateFilter, search])
+  }), [items, kind, category, assetFilter, dateFilter, search])
 
-  const usdOf = (i: ActivityItem) => (prices.current && i.token ? i.amount * (prices.current[i.token] ?? 0) : 0)
+  // Uppercase lookup: tolerates cached items stored before token normalization.
+  const usdOf = (i: ActivityItem) => {
+    if (!prices || !i.token) return 0
+    return i.amount * (prices[(i.token as string).toUpperCase() as typeof i.token] ?? 0)
+  }
   const totals = useMemo(() => {
     let sent = 0, received = 0
     for (const i of filtered) {
@@ -68,12 +87,12 @@ export default function ActivityPage() {
       else received += usd
     }
     return { sent, received, count: filtered.length }
-  }, [filtered]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filtered, prices])
 
   const exportCsv = () => {
-    const header = 'date,type,token,amount,counterparty,tx\n'
+    const header = 'date,category,type,token,amount,counterparty,tx\n'
     const body = filtered
-      .map(i => `${new Date(i.ts * 1000).toISOString()},${i.event},${i.token ?? ''},${i.amount},${i.counterparty},${i.hash}`)
+      .map(i => `${new Date(i.ts * 1000).toISOString()},${i.category},${i.event},${i.token ?? ''},${i.amount},${i.counterparty},${i.hash}`)
       .join('\n')
     const blob = new Blob([header + body], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -84,7 +103,13 @@ export default function ActivityPage() {
     URL.revokeObjectURL(url)
   }
 
-  const TypeIcon: Record<string, LucideIcon> = { PaymentSettled: ArrowUpRight, Transfer: ArrowDownLeft }
+  const TypeIcon: Record<string, LucideIcon> = {
+    PaymentSettled: ArrowUpRight, BatchSettled: ArrowUpRight, Transfer: ArrowDownLeft,
+    StreamOpened: ArrowUpRight, StreamWithdrawn: ArrowDownLeft, StreamTopUp: ArrowUpRight,
+    StreamCancelled: ArrowUpRight, StreamPaused: ArrowUpRight, StreamResumed: ArrowUpRight,
+    LinkCreated: ArrowUpRight, LinkClaimed: ArrowDownLeft, LinkRefunded: ArrowDownLeft,
+    Wrap: ArrowUpRight, Unwrap: ArrowDownLeft, UsernameRegistered: ArrowUpRight,
+  }
 
   return <DashboardShell>
     <section className="dashboard-content ac">
@@ -115,6 +140,9 @@ export default function ActivityPage() {
             {(['All', 'Sent', 'Received'] as Kind[]).map(c => <button key={c} className={c === kind ? 'on' : ''} onClick={() => { setKind(c); setVisible(PAGE_SIZE) }}>{c}</button>)}
           </div>
           <div className="ac-selects">
+            <select value={category} onChange={e => { setCategory(e.target.value); setVisible(PAGE_SIZE) }} aria-label="Category">
+              {['All categories', 'Payment', 'Transfer', 'Stream', 'Payment Link', 'Swap', 'Account'].map(o => <option key={o}>{o}</option>)}
+            </select>
             <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} aria-label="Date">
               {['All time', 'Today', 'This week', 'This month'].map(o => <option key={o}>{o}</option>)}
             </select>
@@ -126,14 +154,14 @@ export default function ActivityPage() {
 
         <div className="ac-table">
           <div className="ac-tr ac-th"><span>Date</span><span>Type</span><span>Counterparty</span><span>Amount</span><span>Status</span></div>
-          {loading && <p className="ac-empty">Reading on-chain history…</p>}
+          {loading && items.length === 0 && <p className="ac-empty">Reading on-chain history…</p>}
           {error && <p className="ac-empty">{error}</p>}
           {!loading && !error && filtered.slice(0, visible).map((t, idx) => {
             const Icon = TypeIcon[t.event] ?? ArrowUpRight
             return (
               <button className="ac-tr ac-row" key={`${t.hash}-${idx}`} onClick={() => setDetail(t)}>
                 <span>{timeAgo(t.ts)}</span>
-                <span className="ac-type"><span className="ac-type-icon"><Icon size={14} /></span>{t.event === 'PaymentSettled' ? 'Payment' : 'Transfer'}</span>
+                <span className="ac-type"><span className="ac-type-icon"><Icon size={14} /></span>{t.category}</span>
                 <span>{shortAddr(t.counterparty)}</span>
                 <span className={`ac-amount ${t.kind === 'received' ? 'up' : ''}`}>{t.kind === 'received' ? '+' : '−'}{t.amount.toLocaleString('en-US', { maximumFractionDigits: 6 })} {t.token ?? ''}</span>
                 <span className="ac-status completed">Confirmed</span>
@@ -154,7 +182,7 @@ export default function ActivityPage() {
       <div className="ac-modal-backdrop" onClick={() => setDetail(null)}>
         <div className="ac-modal" onClick={e => e.stopPropagation()}>
           <div className="ac-modal-head">
-            <h2>{detail.event === 'PaymentSettled' ? 'FluxPay Payment' : 'Token Transfer'}</h2>
+            <h2>{detail.category}</h2>
             <button className="ac-close" onClick={() => setDetail(null)} aria-label="Close"><X size={16} /></button>
           </div>
           <p className="ac-detail-sub">{detail.kind === 'received' ? 'Received' : 'Sent'} on Monad Testnet</p>

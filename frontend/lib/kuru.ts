@@ -7,8 +7,11 @@ import {
   parseAbiItem,
   type Address,
   type Hash,
+  type WalletClient,
 } from 'viem'
 import { monadTestnet } from './chain'
+import { cachedRpc } from './rpc'
+import type { GaslessCall } from './gasless'
 
 export const KURU_ROUTER = '0x1f5A250c4A506DA4cE584173c6ed1890B1bf7187'
 export const KURU_API = (import.meta.env.VITE_KURU_API as string | undefined) ?? 'https://api.testnet.kuru.io'
@@ -88,16 +91,26 @@ export async function getKuruSigner(ethereumProvider: unknown): Promise<ethers.S
 /**
  * Mint Kuru testnet USDC to an address. The mock exposes open minting
  * (verified live via eth_call) — 100 USDC per click for swap testing.
- * NOTE: explicit gasLimit — estimation via the viem-based signing stack
- * systematically reverts against testnet-rpc's balancer; execution itself is fine.
+ * Submitted as a sponsored userOp like every other transaction.
  */
-export async function mintKuruUsdc(ethereumProvider: unknown, to: Address, amountHuman = 100): Promise<Hash> {
-  const provider = new ethers.providers.Web3Provider(ethereumProvider as ethers.providers.ExternalProvider)
-  const signer = provider.getSigner()
-  const token = new ethers.Contract(KURU_USDC, ['function mint(address to, uint256 amount)'], signer)
-  const tx = await token.mint(to, ethers.utils.parseUnits(String(amountHuman), 6), { gasLimit: 150000 })
-  const receipt = await tx.wait()
-  return receipt.transactionHash as Hash
+export async function mintKuruUsdc(
+  walletClient: WalletClient,
+  ownerAddress: Address,
+  to: Address,
+  amountHuman = 100,
+): Promise<Hash> {
+  const { sendGasless } = await import('./gasless')
+  const data = encodeFunctionData({
+    abi: ['function mint(address to, uint256 amount)'],
+    functionName: 'mint',
+    args: [to, BigInt(Math.round(amountHuman * 10 ** 6))],
+  })
+  const result = await sendGasless({
+    walletClient,
+    ownerAddress,
+    calls: [{ to: KURU_USDC, data }],
+  })
+  return result.txHash
 }
 
 export interface DirectQuote {
@@ -207,11 +220,15 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
   if (!found) throw new Error(`no direct Kuru market for ${fromSymbol} → ${toSymbol} (all markets quote in USDC)`)
 
   const { market, side } = found
-  const [bid, ask] = (await publicClient.readContract({
-    address: market.market,
-    abi: MARKET_ABI,
-    functionName: 'bestBidAsk',
-  })) as readonly [bigint, bigint]
+  const [bid, ask] = await cachedRpc<readonly [bigint, bigint]>(
+    `book:${market.market.toLowerCase()}`,
+    15_000,
+    async () => (await publicClient.readContract({
+      address: market.market,
+      abi: MARKET_ABI,
+      functionName: 'bestBidAsk',
+    })) as readonly [bigint, bigint],
+  )
   const { pricePrecision: P, sizePrecision: S } = await marketPrecisions(market.market)
 
   if (side === 'sell') {
@@ -244,18 +261,28 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
  * A pre-check runs first — if it reverts, nothing is broadcast.
  */
 export async function executeSwap(opts: {
-  ethereumProvider: unknown
+  walletClient: WalletClient
   ownerAddress: Address
+  ethereumProvider: unknown
   quote: DirectQuote
   onStatus?: (status: 'approving' | 'simulating' | 'swapping') => void
 }): Promise<{ txHash: Hash; partialFill: boolean }> {
   const { ownerAddress, quote } = opts
   const provider = new ethers.providers.Web3Provider(opts.ethereumProvider as ethers.providers.ExternalProvider)
-  const signer = provider.getSigner()
+  const { sendGasless } = await import('./gasless')
+  const submit = (calls: GaslessCall[]) =>
+    sendGasless({
+      walletClient: opts.walletClient,
+      ownerAddress,
+      calls,
+      onStatus: s => {
+        if (s === 'signing' || s === 'submitted' || s === 'confirmed') opts.onStatus?.('swapping')
+      },
+    })
 
   // Wrap path: MON↔WMON directly against the canonical wrapper (1:1, always executable).
   if (quote.kind === 'wrap') {
-    const wmon = new ethers.Contract(quote.market, WRAP_ABI, signer)
+    const wmon = new ethers.Contract(quote.market, WRAP_ABI, provider)
     const callData = quote.side === 'wrap'
       ? { to: quote.market, data: wmon.interface.encodeFunctionData('deposit'), value: ethers.BigNumber.from(quote.inputRaw.toString()), from: ownerAddress }
       : { to: quote.market, data: wmon.interface.encodeFunctionData('withdraw', [quote.inputRaw.toString()]), value: ethers.BigNumber.from(0), from: ownerAddress }
@@ -267,23 +294,17 @@ export async function executeSwap(opts: {
       throw new Error(`wrap rejected in simulation: ${err.reason || err.message}`)
     }
     opts.onStatus?.('swapping')
-    const tx = quote.side === 'wrap'
-      ? await wmon.deposit({ value: ethers.BigNumber.from(quote.inputRaw.toString()) })
-      : await wmon.withdraw(quote.inputRaw.toString())
-    const receipt = await tx.wait()
-    return { txHash: receipt.transactionHash as Hash, partialFill: false }
+    const result = await submit([
+      quote.side === 'wrap'
+        ? { to: quote.market, data: encodeWrapCall(), value: quote.inputRaw }
+        : { to: quote.market, data: encodeUnwrapCall(quote) },
+    ])
+    return { txHash: result.txHash, partialFill: false }
   }
 
-  const market = new ethers.Contract(quote.market, MARKET_ABI, signer)
+  const market = new ethers.Contract(quote.market, MARKET_ABI, provider)
   const inputIsNative = quote.from.address === ADDRESS_ZERO
   const fn = quote.side === 'sell' ? 'placeAndExecuteMarketSell' : 'placeAndExecuteMarketBuy'
-
-  if (!inputIsNative) {
-    opts.onStatus?.('approving')
-    const token = new ethers.Contract(quote.from.address, ERC20_ABI, signer)
-    const approveTx = await token.approve(quote.market, ethers.BigNumber.from(quote.inputRaw.toString()))
-    await approveTx.wait()
-  }
 
   const buildCall = (fok: boolean) => ({
     to: quote.market,
@@ -292,7 +313,7 @@ export async function executeSwap(opts: {
     from: ownerAddress,
   })
 
-  // Pre-check with the same library that executes (ethers eth_call succeeds reliably).
+  // Pre-check with the library that simulates reliably (ethers eth_call).
   opts.onStatus?.('simulating')
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
   let fok = true
@@ -321,20 +342,41 @@ export async function executeSwap(opts: {
     throw new Error(`market rejected the swap in simulation: ${err.reason || err.message}`)
   }
 
-  opts.onStatus?.('swapping')
-  const tx = await market[fn](
-    quote.inputUnits.toString(),
-    quote.minOutRaw.toString(),
-    false,
-    fok,
-    {
-      value: inputIsNative ? ethers.BigNumber.from(quote.inputRaw.toString()) : 0,
-      // explicit limit: skip estimator (see mintKuruUsdc note)
-      gasLimit: 1000000,
-    },
-  )
-  const receipt = await tx.wait()
-  return { txHash: receipt.transactionHash as Hash, partialFill: !fok }
+  const calls: GaslessCall[] = []
+  if (!inputIsNative) {
+    calls.push({ to: quote.from.address, data: encodeApproveCall(quote.from.address, quote.market, quote.inputRaw) })
+  }
+  calls.push({
+    to: quote.market,
+    data: encodeMarketCall(fn, quote, fok),
+    value: inputIsNative ? quote.inputRaw : 0n,
+  })
+  const result = await submit(calls)
+  return { txHash: result.txHash, partialFill: !fok }
+}
+
+function encodeApproveCall(token: Address, spender: Address, amount: bigint): Hash {
+  return encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [spender, amount] })
+}
+
+function encodeMarketCall(
+  fn: 'placeAndExecuteMarketSell' | 'placeAndExecuteMarketBuy',
+  quote: DirectQuote,
+  fok: boolean,
+): Hash {
+  return encodeFunctionData({
+    abi: MARKET_ABI,
+    functionName: fn,
+    args: [quote.inputUnits, quote.minOutRaw, false, fok],
+  })
+}
+
+function encodeWrapCall(): Hash {
+  return encodeFunctionData({ abi: WRAP_ABI, functionName: 'deposit' })
+}
+
+function encodeUnwrapCall(quote: DirectQuote): Hash {
+  return encodeFunctionData({ abi: WRAP_ABI, functionName: 'withdraw', args: [quote.inputRaw] })
 }
 
 export const formatQuoteAmount = (raw: bigint, decimals: number) =>

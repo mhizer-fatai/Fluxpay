@@ -5,10 +5,12 @@ import {
   Send, Wallet, type LucideIcon,
 } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { SmartWalletGate } from '@/components/guard'
 import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { listStreams } from '@/lib/streams'
-import { fetchActivity } from '@/lib/activity'
+import { fetchActivity, peekActivity } from '@/lib/activity'
 import { money, timeAgo } from '@/lib/format'
 
 const quickActions: Array<{ label: string; icon: LucideIcon; href: string; soon?: boolean }> = [
@@ -19,7 +21,14 @@ const quickActions: Array<{ label: string; icon: LucideIcon; href: string; soon?
 ]
 
 export default function DashboardPage() {
-  const { profile, address } = useProfile()
+  return <SmartWalletGate><DashboardContent /></SmartWalletGate>
+}
+
+function DashboardContent() {
+  const { profile } = useProfile()
+  // Smart account only — the EOA never appears in money UI.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
   const { rows, totalUsd, loading } = useBalances(address)
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof fetchActivity>>>([])
@@ -27,8 +36,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!address) return
+    const peeked = peekActivity(address)
+    if (peeked && peeked.length > 0) setActivity(peeked.slice(0, 6))
     void listStreams(address).then(setStreams).catch(() => setStreams([]))
-    void fetchActivity(address, 10_000).then(items => setActivity(items.slice(0, 6))).catch(() => setActivity([]))
+    void fetchActivity(address).then(items => setActivity(items.slice(0, 6))).catch(() => { /* keep peeked items */ })
   }, [address])
 
   const hour = new Date().getHours()

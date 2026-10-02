@@ -26,19 +26,31 @@ export const profileService = {
     return toProfileDto(row);
   },
 
+  /** Resolve the first existing profile across candidate addresses (one request, no 404 probing). */
+  async resolve(addresses: string[]): Promise<ProfileDto> {
+    const clean = [...new Set(addresses.map(a => a.toLowerCase()))].slice(0, 5);
+    const row = await profileRepo.findFirstByAddresses(clean);
+    if (!row) throw notFound("profile");
+    return toProfileDto(row);
+  },
+
   async upsertBase(input: { address: string; fullName: string; email?: string; privyUserId: string }): Promise<ProfileDto> {
-    const row = await profileRepo.upsertBase({
+    const result = await profileRepo.upsertBaseGuarded({
       address: input.address,
       fullName: input.fullName,
       email: input.email ?? null,
       privyUserId: input.privyUserId,
     });
-    return toProfileDto(row);
+    if ("conflict" in result) {
+      throw new AppError("this wallet belongs to another user", 403, "address_owned_by_another_user");
+    }
+    return toProfileDto(result.row);
   },
 
   /**
    * Claim flow (DB-owned usernames): first-come-first-served in the usernames table.
-   * Authorization: caller is authenticated; the address binds to the Privy user id.
+   * Authorization: the wallet address binds to the first Privy user that claims it;
+   * later writes from a different user are rejected (403).
    */
   async claimUsernameInDb(input: {
     address: string;
@@ -58,6 +70,9 @@ export const profileService = {
     });
     if (!row) {
       throw new AppError("username is already taken", 409, "username_taken");
+    }
+    if ("conflict" in row) {
+      throw new AppError("this wallet belongs to another user", 403, "address_owned_by_another_user");
     }
     return toProfileDto(row);
   },

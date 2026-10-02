@@ -13,9 +13,62 @@ export const monadTestnet: Chain = defineChain({
 
 export const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 10143)
 
+// Transport-level guardrails: the public testnet RPC rate-limits aggressively (429s).
+// One gate for ALL viem reads — max 6 concurrent, single retry with backoff on 429.
+const MAX_RPC_CONCURRENT = 6
+let rpcRunning = 0
+const rpcQueue: Array<() => void> = []
+const rpcAcquire = (): Promise<void> => {
+  if (rpcRunning < MAX_RPC_CONCURRENT) {
+    rpcRunning += 1
+    return Promise.resolve()
+  }
+  return new Promise(resolve => rpcQueue.push(resolve))
+}
+const rpcRelease = () => {
+  rpcRunning -= 1
+  const next = rpcQueue.shift()
+  if (next) {
+    rpcRunning += 1
+    next()
+  }
+}
+const rpcFetch: typeof fetch = (async (input: any, init?: any) => {
+  const withTimeout = async (ms: number): Promise<Response> => {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), ms)
+    try {
+      return await fetch(input, { ...init, signal: ctrl.signal })
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  await rpcAcquire()
+  let res: Response
+  try {
+    res = await withTimeout(20_000)
+  } catch (e) {
+    rpcRelease()
+    throw e
+  }
+  if (res.status !== 429) {
+    rpcRelease()
+    return res
+  }
+  // 429: back off once, then retry through the gate
+  rpcRelease()
+  await new Promise(r => setTimeout(r, 1500))
+  await rpcAcquire()
+  try {
+    return await withTimeout(20_000)
+  } finally {
+    rpcRelease()
+  }
+}) as typeof fetch
+
 export const publicClient = createPublicClient({
   chain: monadTestnet,
-  transport: http(),
+  transport: http(undefined, { fetchFn: rpcFetch }),
 })
 
 export const EXPLORER_URL = monadTestnet.blockExplorers?.default?.url ?? 'https://testnet.monadexplorer.com'
@@ -149,18 +202,21 @@ export const formatTokenAmount = (raw: bigint, decimals: number, maxFrac = 6): s
 
 export const shortenAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
-// USD prices: stables are $1 by definition; volatile tokens use CoinGecko with graceful fallback.
+// USD prices: stables are $1 by definition. Volatile prices come from OUR backend
+// (/api/v1/prices proxies CoinGecko server-side — browsers get CORS-blocked there).
+// Cached 5 min here; backend caches 60s.
 let priceCache: { at: number; prices: Record<TokenKey, number> } | null = null
 export async function getUsdPrices(): Promise<Record<TokenKey, number>> {
   if (priceCache && Date.now() - priceCache.at < 5 * 60 * 1000) return priceCache.prices
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
   const prices: Record<TokenKey, number> = { MON: 0, USDC: 1, AUSD: 1, WETH: 0, WMON: 0, KUSDC: 1 }
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=monad,ethereum&vs_currencies=usd')
+    const res = await fetch(`${API_URL}/api/v1/prices`)
     if (res.ok) {
-      const data = await res.json()
-      if (data.monad?.usd) prices.MON = data.monad.usd
-      if (data.ethereum?.usd) prices.WETH = data.ethereum.usd
-      prices.WMON = prices.MON
+      const data = (await res.json()) as Partial<Record<TokenKey, number>>
+      for (const k of Object.keys(prices) as TokenKey[]) {
+        if (typeof data[k] === 'number') prices[k] = data[k] as number
+      }
     }
   } catch { /* keep fallback */ }
   priceCache = { at: Date.now(), prices }

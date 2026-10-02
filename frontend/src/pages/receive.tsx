@@ -1,12 +1,21 @@
 import { useState } from 'react'
 import { Copy, Maximize2, Share2, X } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { SmartWalletGate } from '@/components/guard'
 import { QrCode } from '@/components/qr-code'
 import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
 import { shortAddr } from '@/lib/format'
 
 export default function ReceivePage() {
-  const { address, profile } = useProfile()
+  return <SmartWalletGate><ReceiveContent /></SmartWalletGate>
+}
+
+function ReceiveContent() {
+  const { profile } = useProfile()
+  // Smart account only — funds must land in the smart account, never the EOA.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
   const [copied, setCopied] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
 

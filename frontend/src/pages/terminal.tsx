@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, ExternalLink } from 'lucide-react'
 import type { Address } from 'viem'
+import { ArrowRight, ExternalLink } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { SmartWalletGate } from '@/components/guard'
 import { useProfile } from '@/hooks/profile'
 import { useBalances } from '@/hooks/useBalances'
 import { useWallet } from '@/hooks/useWallet'
-import { sendFunds } from '@/lib/transfers'
+import { buildSettleCalls, sendGasless } from '@/lib/gasless'
 import { getUsdPrices, TOKENS, tokenByKey, type TokenKey } from '@/lib/chain'
 import { resolveUsernameApi } from '@/lib/api'
 import { money, shortAddr } from '@/lib/format'
@@ -23,9 +24,14 @@ const HELP = `Available commands:
   help                          — this message`
 
 export default function TerminalPage() {
+  return <SmartWalletGate><TerminalContent /></SmartWalletGate>
+}
+
+function TerminalContent() {
   const { address } = useProfile()
-  const { getWalletClient } = useWallet()
-  const { rows, refresh } = useBalances(address)
+  // Balances are smart-only; `address` (EOA) below signs userOps invisibly.
+  const { smartAddress, getWalletClient } = useWallet()
+  const { rows, refresh } = useBalances(smartAddress)
   const [input, setInput] = useState('')
   const [lines, setLines] = useState<Line[]>([
     { kind: 'out', text: 'FluxPay Terminal — connected to Monad testnet. Type "help" for commands.' },
@@ -94,7 +100,7 @@ export default function TerminalPage() {
           try { to = (await resolveUsernameApi(to.replace(/^@/, ''))).address } catch { push({ kind: 'err', text: `Recipient ${m[3]} is not a valid address or registered username` }); return }
         }
         pending.current = { amount, token: tokenKey, to }
-        push({ kind: 'out', text: `Ready: send ${amount} ${tokenKey} to ${shortAddr(to)}\nType "confirm" to execute (this spends gas).` })
+        push({ kind: 'out', text: `Ready: send ${amount} ${tokenKey} to ${shortAddr(to)}\nType "confirm" to execute.` })
         done('Prepared')
         return
       }
@@ -105,9 +111,10 @@ export default function TerminalPage() {
         const { amount, token: tokenKey, to } = pending.current
         const walletClient = await getWalletClient()
         if (!walletClient) { push({ kind: 'err', text: 'Wallet client unavailable' }); return }
-        push({ kind: 'out', text: 'Executing… approve (if needed) + settle.' })
-        const result = await sendFunds({
-          walletClient, from: address as Address, token: tokenByKey(tokenKey), amountHuman: amount, to: to as Address,
+        push({ kind: 'out', text: 'Executing…' })
+        const result = await sendGasless({
+          walletClient, ownerAddress: address as Address,
+          calls: buildSettleCalls({ token: tokenByKey(tokenKey), amountHuman: amount, to: to as Address }),
         })
         push({ kind: 'out', text: `Confirmed. tx: ${result.txHash}`, txHash: result.txHash })
         done('Transfer', result.txHash)

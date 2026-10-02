@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Boxes, Coins, Plus, TrendingUp, Wallet, X, type LucideIcon } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
-import { useProfile } from '@/hooks/profile'
+import { SmartWalletGate } from '@/components/guard'
+import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { listStreams } from '@/lib/streams'
 import { TOKENS } from '@/lib/chain'
@@ -11,7 +12,13 @@ import { money } from '@/lib/format'
 const TOKEN_COLORS: Record<string, string> = { MON: '#6E56CF', USDC: '#2775CA', AUSD: '#0EA5E9', WETH: '#627EEA', WMON: '#836EA8' }
 
 export default function PortfolioPage() {
-  const { address } = useProfile()
+  return <SmartWalletGate><PortfolioContent /></SmartWalletGate>
+}
+
+function PortfolioContent() {
+  // Smart account only — the EOA never appears in money UI.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
   const { rows, totalUsd, loading } = useBalances(address)
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [asset, setAsset] = useState<{ key: string; amount: number; usd: number } | null>(null)

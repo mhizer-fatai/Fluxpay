@@ -32,6 +32,9 @@ export default function AuthPage() {
   const prev = () => setIndex(i => (i - 1 + reviews.length) % reviews.length)
   const next = () => setIndex(i => (i + 1) % reviews.length)
 
+  // Logged in: don't flash the login form while the post-login destination resolves.
+  if (ready && authenticated) return null
+
   return <main className="auth-page">
     <div className="auth-card">
       <div className="auth-visual">
@@ -57,8 +60,8 @@ export default function AuthPage() {
             Continue with Google
           </button>
           <button className="social-button" disabled={!ready} onClick={() => login()}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-            Continue with Wallet
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M18.9 1.15h3.68l-8.04 9.19L24 22.85h-7.41l-5.8-7.58-6.64 7.58H.47l8.6-9.83L0 1.15h7.6l5.24 6.93 6.06-6.93Zm-1.29 19.5h2.04L6.49 3.24H4.3l13.31 17.41Z"/></svg>
+            Continue with X
           </button>
         </div>
         <div className="divider"><span>OR</span></div>

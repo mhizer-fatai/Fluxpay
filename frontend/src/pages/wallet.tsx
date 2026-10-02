@@ -2,16 +2,25 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowDownLeft, ArrowLeftRight, ArrowRight, Copy, Link2, QrCode, Send, X } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { SmartWalletGate } from '@/components/guard'
 import { useProfile } from '@/hooks/profile'
+import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
-import { fetchActivity } from '@/lib/activity'
+import { fetchActivity, peekActivity } from '@/lib/activity'
 import { money, shortAddr, timeAgo } from '@/lib/format'
 import type { ActivityItem } from '@/lib/activity'
 
 const TOKEN_COLORS: Record<string, string> = { MON: '#6E56CF', USDC: '#2775CA', AUSD: '#0EA5E9', WETH: '#627EEA', WMON: '#836EEX' }
 
 export default function WalletPage() {
-  const { address, profile } = useProfile()
+  return <SmartWalletGate><WalletContent /></SmartWalletGate>
+}
+
+function WalletContent() {
+  const { profile } = useProfile()
+  // Smart account only — the EOA never appears in money UI.
+  const { smartAddress } = useWallet()
+  const address = smartAddress as string
   const { rows, totalUsd, loading, error, refresh } = useBalances(address)
   const [asset, setAsset] = useState<{ key: string; amount: number; usd: number } | null>(null)
   const [copied, setCopied] = useState(false)
@@ -20,11 +29,15 @@ export default function WalletPage() {
 
   useEffect(() => {
     if (!address) return
+    const peeked = peekActivity(address)
+    if (peeked && peeked.length > 0) setActivity(peeked.slice(0, 5))
     setActivityLoading(true)
-    fetchActivity(address, 10_000)
+    const held = rows.filter(r => r.amount > 0).map(r => r.key)
+    fetchActivity(address, 1800, held.length > 0 ? { tokenKeys: held } : undefined)
       .then(items => setActivity(items.slice(0, 5)))
-      .catch(() => setActivity([]))
+      .catch(() => { /* keep peeked items on failure */ })
       .finally(() => setActivityLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address])
 
   const copyAddress = () => {
