@@ -13,7 +13,7 @@ export function GuardLoading() {
 export function RequireProfile({ children }: { children: ReactNode }) {
   const { status, refresh } = useProfile()
   const location = useLocation()
-  if (status === 'anonymous') return <Navigate to="/auth" replace state={{ from: location.pathname }} />
+  if (status === 'anonymous' || status === 'session_expired') return <Navigate to="/auth" replace state={{ from: location.pathname }} />
   if (status === 'needs_onboarding') return <Navigate to="/onboarding" replace />
   if (status === 'loading') return <GuardLoading />
   // Backend outage: hold position with a retry instead of dumping to onboarding.

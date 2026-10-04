@@ -32,8 +32,10 @@ export default function AuthPage() {
   const prev = () => setIndex(i => (i - 1 + reviews.length) % reviews.length)
   const next = () => setIndex(i => (i + 1) % reviews.length)
 
-  // Logged in: don't flash the login form while the post-login destination resolves.
-  if (ready && authenticated) return null
+  // Logged in: don't flash the login form while the post-login destination
+  // resolves — EXCEPT when the session is expired/dead, where the form is the
+  // only way forward even if Privy still reports `authenticated`.
+  if (ready && authenticated && status !== 'session_expired') return null
 
   return <main className="auth-page">
     <div className="auth-card">

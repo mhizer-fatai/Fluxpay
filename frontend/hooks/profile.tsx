@@ -1,8 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useWallet } from './useWallet'
-import { claimUsername, resolveProfile, setTokenProvider, type Profile } from '../lib/api'
+import { claimUsername, resolveProfile, setTokenProvider, setTokenRefresher, type Profile } from '../lib/api'
 
-type ProfileStatus = 'loading' | 'onboarded' | 'needs_onboarding' | 'anonymous' | 'unreachable'
+type ProfileStatus = 'loading' | 'onboarded' | 'needs_onboarding' | 'anonymous' | 'unreachable' | 'session_expired'
 
 interface ProfileCtx {
   status: ProfileStatus
@@ -15,19 +15,35 @@ interface ProfileCtx {
 const Ctx = createContext<ProfileCtx | null>(null)
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
-  const { ready, authenticated, address, smartAddress, getAccessToken } = useWallet()
+  const { ready, authenticated, address, smartAddress, getAccessToken, logout } = useWallet()
   const [status, setStatus] = useState<ProfileStatus>('loading')
   const [profile, setProfile] = useState<Profile | null>(null)
+  // Guards the best-effort Privy logout so a dead session can't trigger a
+  // logout storm across re-renders/retries.
+  const sessionEndedRef = useRef(false)
 
   useEffect(() => {
     setTokenProvider(getAccessToken)
+    setTokenRefresher(getAccessToken)
   }, [getAccessToken])
+
+  // A new successful login re-arms the session-ended guard.
+  useEffect(() => {
+    if (authenticated) sessionEndedRef.current = false
+  }, [authenticated])
 
   // Identity lives on the EOA row; money routes to the smart account row when present.
   const refresh = useCallback(async () => {
     if (!authenticated) {
       setStatus('anonymous')
       setProfile(null)
+      return
+    }
+    // Session already ended this cycle: don't hammer the backend; stay routed
+    // to /auth until a fresh login re-arms the guard.
+    if (sessionEndedRef.current) {
+      setProfile(null)
+      setStatus('session_expired')
       return
     }
     // Embedded wallet may still be creating right after login — wait for an address
@@ -43,10 +59,20 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       setProfile(p)
       setStatus('onboarded')
     } catch (err) {
-      const e = err as { status?: number }
+      const e = err as { status?: number; code?: string }
       if (e.status === 404) {
         setProfile(null)
         setStatus('needs_onboarding')
+      } else if (e.status === 401) {
+        // Token missing or rejected even after the single refresh retry. This is
+        // a session problem, not a backend blip: route to /auth and clear the
+        // dead Privy session ONCE (best-effort — logout 400s if it is already gone).
+        if (!sessionEndedRef.current) {
+          sessionEndedRef.current = true
+          try { await logout() } catch { /* session already invalid */ }
+        }
+        setProfile(null)
+        setStatus('session_expired')
       } else {
         // Backend down / 5xx / network blip: this is NOT "no account".
         // Mark unreachable so guards show a retry screen instead of
@@ -55,7 +81,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         setStatus('unreachable')
       }
     }
-  }, [authenticated, address, smartAddress])
+  }, [authenticated, address, smartAddress, logout])
 
   useEffect(() => {
     if (!ready) return

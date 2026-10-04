@@ -1,9 +1,31 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
+/** Typed API failure: `status` is HTTP (0 = never reached the backend), `code` is the backend error/reason. */
+export class ApiError extends Error {
+  status: number
+  code?: string
+  constructor(status: number, message: string, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
 let tokenProvider: () => Promise<string | null> = async () => null
+let tokenRefresher: () => Promise<string | null> = async () => null
 
 export function setTokenProvider(fn: () => Promise<string | null>) {
   tokenProvider = fn
+}
+
+/**
+ * Optional: force a fresh access token after a 401, used for the single retry.
+ * Backed by Privy's `getAccessToken`, which refreshes when the token is
+ * expired or expiring.
+ */
+export function setTokenRefresher(fn: () => Promise<string | null>) {
+  tokenRefresher = fn
 }
 
 /** Raw access token for transports that need an Authorization header (e.g. the AA proxy). */
@@ -15,27 +37,48 @@ export async function getAuthToken(): Promise<string | null> {
   }
 }
 
+function requestHeaders(token: string | null, init?: RequestInit): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...init?.headers,
+  }
+}
+
+async function toApiError(path: string, res: Response): Promise<ApiError> {
+  let body: unknown = null
+  try { body = await res.json() } catch { /* non-JSON body */ }
+  const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : null
+  const code = typeof record?.reason === 'string' ? record.reason
+    : typeof record?.error === 'string' ? record.error
+    : undefined
+  return new ApiError(res.status, `API ${res.status}: ${path}`, code)
+}
+
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
   let token: string | null = null
   try {
     token = await tokenProvider()
-  } catch { /* unauthenticated — public endpoints still work */ }
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers,
-    },
-  })
-  if (!res.ok) {
-    let body: unknown = null
-    try { body = await res.json() } catch { /* ignore */ }
-    const err = new Error(`API ${res.status}: ${path}`) as Error & { status?: number; body?: unknown }
-    err.status = res.status
-    err.body = body
-    throw err
+  } catch (err) {
+    // The token provider itself failed (e.g. Privy refresh threw). Do NOT send
+    // a protected request with no credentials — surface the real failure.
+    throw new ApiError(401, `token_unavailable: ${path}: ${err instanceof Error ? err.message : String(err)}`, 'token_unavailable')
   }
+
+  let res = await fetch(`${API_URL}${path}`, { ...init, headers: requestHeaders(token, init) })
+
+  // One bounded retry with a freshly acquired token on 401. Covers the case
+  // where the token was stale but Privy can still mint a valid one.
+  if (res.status === 401) {
+    let fresh: string | null = null
+    try { fresh = await tokenRefresher() } catch { fresh = null }
+    if (fresh && fresh !== token) {
+      token = fresh
+      res = await fetch(`${API_URL}${path}`, { ...init, headers: requestHeaders(token, init) })
+    }
+  }
+
+  if (!res.ok) throw await toApiError(path, res)
   return res.json() as Promise<T>
 }
 
@@ -104,3 +147,37 @@ export const createPaymentIntent = (body: { idempotencyKey: string; fromAddress:
 
 export const patchPaymentIntent = (intentId: string, body: { status: 'submitted' | 'confirmed' | 'failed'; useropHash?: string; txHash?: string }) =>
   api<PaymentIntent>(`/api/v1/payments/intents/${encodeURIComponent(intentId)}`, { method: 'PATCH', body: JSON.stringify(body) })
+
+// --- Dev-only diagnostics (never shipped in a production build) ---------------
+// Run in the browser console:  await __fluxpay.tokenInfo()
+// Tells you whether the current Privy access token is valid *relative to this
+// device's clock* — the key signal when a login 401s.
+function decodeJwtPart(part: string): Record<string, unknown> {
+  const b64 = part.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+  return JSON.parse(atob(padded)) as Record<string, unknown>
+}
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as Record<string, unknown>).__fluxpay = {
+    apiUrl: API_URL,
+    async tokenInfo() {
+      const token = await getAuthToken()
+      if (!token) return { token: null }
+      const [header, payload] = token.split('.')
+      const h = header ? decodeJwtPart(header) : {}
+      const p = payload ? decodeJwtPart(payload) : {}
+      const deviceNow = Math.floor(Date.now() / 1000)
+      const exp = typeof p.exp === 'number' ? p.exp : undefined
+      return {
+        alg: h.alg, kid: h.kid,
+        iss: p.iss, aud: p.aud, sub: p.sub,
+        iat: p.iat, exp,
+        deviceNow,
+        deviceUtc: new Date().toISOString(),
+        secondsUntilExpiry: exp !== undefined ? exp - deviceNow : null,
+        expiredByDeviceClock: exp !== undefined ? deviceNow > exp : null,
+      }
+    },
+  }
+}
