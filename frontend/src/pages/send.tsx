@@ -11,7 +11,7 @@ import { buildSettleCalls, getUserOpReceipt, sendGasless } from '@/lib/gasless'
 import { fetchActivity } from '@/lib/activity'
 import { getUsdPrices, TOKENS, type TokenKey } from '@/lib/chain'
 import { resolveUsernameApi, createPaymentIntent, patchPaymentIntent } from '@/lib/api'
-import { money, shortAddr } from '@/lib/format'
+import { money } from '@/lib/format'
 import { EXPLORER_URL, publicClient } from '@/lib/chain'
 
 type Step = 'form' | 'confirm' | 'sending' | 'pending' | 'success'
@@ -371,7 +371,7 @@ function SendContent() {
   const summary = useMemo(() => (
     <>
       <div className="sn-sum-row"><span>You&apos;re sending</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
-      <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
+      <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{resolvedTo ?? recipient}</strong></div>
       <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
       <div className="sn-sum-row sn-sum-total"><span>Total</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
     </>
@@ -458,9 +458,9 @@ function SendContent() {
               <p className="sn-hint">{busy || 'Waiting for confirmation on Monad…'}</p>
               <div className="sn-summary">
                 <div className="sn-sum-row"><span>Amount</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
-                <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{resolvedTo ?? recipient}</strong></div>
                 {userOpHash && (
-                  <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{shortAddr(userOpHash)}</strong></div>
+                  <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{userOpHash}</strong></div>
                 )}
                 {userOpHash && (
                   <div className="sn-sum-row"><span>Elapsed</span><strong>{fmtElapsed(confirmSecs)}</strong></div>
@@ -481,9 +481,9 @@ function SendContent() {
               <p className="sn-warning">Confirmation is taking longer than usual, but your transaction was submitted and may still land. <strong>Do not send again</strong> — that could transfer twice.</p>
               <div className="sn-summary">
                 <div className="sn-sum-row"><span>Amount</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
-                <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{resolvedTo ?? recipient}</strong></div>
                 {userOpHash && (
-                  <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{shortAddr(userOpHash)}</strong></div>
+                  <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{userOpHash}</strong></div>
                 )}
               </div>
               {error && <p style={{ color: '#ef4444', fontSize: 13 }}>{error}</p>}
@@ -500,10 +500,10 @@ function SendContent() {
               <span className="sn-success-icon"><Check size={22} /></span>
               <h2>Transaction successful</h2>
               <p className="sn-success-amount">{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</p>
-              <p className="sn-success-sub">sent to {resolvedTo ? shortAddr(resolvedTo) : recipient} · confirmed on Monad Testnet.</p>
+              <p className="sn-success-sub" style={{ wordBreak: 'break-all' }}>sent to {resolvedTo ?? recipient} · confirmed on Monad Testnet.</p>
               <div className="sn-summary">
-                <div className="sn-sum-row"><span>To</span><strong>{resolvedTo ? shortAddr(resolvedTo) : recipient}</strong></div>
-                <div className="sn-sum-row"><span>Transaction</span><strong style={{ wordBreak: 'break-all' }}>{txHash ? shortAddr(txHash) : '—'}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{resolvedTo ?? recipient}</strong></div>
+                <div className="sn-sum-row"><span>Transaction</span><strong style={{ wordBreak: 'break-all' }}>{txHash ?? '—'}</strong></div>
                 <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
               </div>
               <div className="sn-actions">
@@ -515,7 +515,7 @@ function SendContent() {
                   <div className="sn-sum-row"><span>Status</span><strong style={{ color: receipt.status === 'success' ? '#16a34a' : '#ef4444' }}>{receipt.status === 'success' ? 'Success' : 'Reverted'}</strong></div>
                   <div className="sn-sum-row"><span>Block</span><strong>#{Number(receipt.blockNumber).toLocaleString('en-US')}</strong></div>
                   <div className="sn-sum-row"><span>Gas used</span><strong>{Number(receipt.gasUsed).toLocaleString('en-US')}</strong></div>
-                  {userOpHash && <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{shortAddr(userOpHash)}</strong></div>}
+                  {userOpHash && <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{userOpHash}</strong></div>}
                   {txHash && <div className="sn-sum-row"><span>Tx hash</span><strong style={{ wordBreak: 'break-all', fontSize: 12 }}>{txHash}</strong></div>}
                 </div>
               )}
@@ -535,7 +535,7 @@ function SendContent() {
           <div className="sn-recents-head"><h2>Recent Recipients</h2></div>
           {recents.map(r => (
             <button className="sn-recent" key={r.addr} onClick={() => { setRecipient(r.addr); setStep('form') }}>
-              <span className="sn-recent-addr">{shortAddr(r.addr)}</span>
+              <span className="sn-recent-addr" style={{ wordBreak: 'break-all' }}>{r.addr}</span>
               <span className="sn-recent-last">Last: {r.last}</span>
             </button>
           ))}

@@ -8,6 +8,7 @@ interface ProfileCtx {
   status: ProfileStatus
   profile: Profile | null
   address: string | null
+  hydrated: boolean
   refresh: () => Promise<void>
   completeOnboarding: (args: { username: string; fullName: string; email?: string }) => Promise<Profile>
 }
@@ -18,6 +19,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const { ready, authenticated, address, smartAddress, getAccessToken, logout } = useWallet()
   const [status, setStatus] = useState<ProfileStatus>('loading')
   const [profile, setProfile] = useState<Profile | null>(null)
+  // True once the first profile resolution completes. Guards use it so a later
+  // background refresh (which sets status='loading') never unmounts the page
+  // and blows away in-page state like a send in progress.
+  const [hydrated, setHydrated] = useState(false)
   // Guards the best-effort Privy logout so a dead session can't trigger a
   // logout storm across re-renders/retries.
   const sessionEndedRef = useRef(false)
@@ -37,6 +42,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (!authenticated) {
       setStatus('anonymous')
       setProfile(null)
+      setHydrated(true)
       return
     }
     // Session already ended this cycle: don't hammer the backend; stay routed
@@ -44,6 +50,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (sessionEndedRef.current) {
       setProfile(null)
       setStatus('session_expired')
+      setHydrated(true)
       return
     }
     // Embedded wallet may still be creating right after login — wait for an address
@@ -58,11 +65,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       const p = await resolveProfile(candidates)
       setProfile(p)
       setStatus('onboarded')
+      setHydrated(true)
     } catch (err) {
       const e = err as { status?: number; code?: string }
       if (e.status === 404) {
         setProfile(null)
         setStatus('needs_onboarding')
+        setHydrated(true)
       } else if (e.status === 401) {
         // Token missing or rejected even after the single refresh retry. This is
         // a session problem, not a backend blip: route to /auth and clear the
@@ -73,12 +82,14 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         }
         setProfile(null)
         setStatus('session_expired')
+        setHydrated(true)
       } else {
         // Backend down / 5xx / network blip: this is NOT "no account".
         // Mark unreachable so guards show a retry screen instead of
         // bouncing a logged-in user into the onboarding funnel.
         setProfile(null)
         setStatus('unreachable')
+        setHydrated(true)
       }
     }
   }, [authenticated, address, smartAddress, logout])
@@ -141,7 +152,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     [address, smartAddress],
   )
 
-  return <Ctx.Provider value={{ status, profile, address, refresh, completeOnboarding }}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={{ status, profile, address, hydrated, refresh, completeOnboarding }}>{children}</Ctx.Provider>
 }
 
 export function useProfile() {

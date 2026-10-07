@@ -11,11 +11,14 @@ export function GuardLoading() {
 
 /** Blocks dashboard routes unless authenticated AND onboarded. */
 export function RequireProfile({ children }: { children: ReactNode }) {
-  const { status, refresh } = useProfile()
+  const { status, hydrated, refresh } = useProfile()
   const location = useLocation()
   if (status === 'anonymous' || status === 'session_expired') return <Navigate to="/auth" replace state={{ from: location.pathname }} />
   if (status === 'needs_onboarding') return <Navigate to="/onboarding" replace />
-  if (status === 'loading') return <GuardLoading />
+  // Only the FIRST resolution blocks the page. A later background refresh flips
+  // status to 'loading' but must NOT unmount the page (that would wipe in-page
+  // state, e.g. a send in progress).
+  if (!hydrated) return <GuardLoading />
   // Backend outage: hold position with a retry instead of dumping to onboarding.
   if (status === 'unreachable') {
     return (

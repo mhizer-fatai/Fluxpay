@@ -231,8 +231,13 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
   )
   const { pricePrecision: P, sizePrecision: S } = await marketPrecisions(market.market)
 
+  // Kuru signals an empty side with the uint32-max sentinel (0xffffffff), not 0.
+  // Treating it as a real price produces a nonsense quote and lets the user try
+  // a swap that can only revert — so reject it as "no route".
+  const EMPTY_BOOK = 0xffffffffn
+
   if (side === 'sell') {
-    if (bid === 0n) throw new Error(`no bids on ${fromSymbol}/USDC right now — nobody to sell to`)
+    if (bid === 0n || bid >= EMPTY_BOOK) throw new Error(`no bids on ${fromSymbol}/USDC right now — nobody to sell to`)
     const inputRaw = BigInt(Math.round(amountHuman * 10 ** from.decimals))
     const inputUnits = BigInt(Math.round(amountHuman * Number(S)))
     // out(quoteRaw) = amountHuman × bid/P × 10^quoteDec
@@ -242,7 +247,7 @@ export async function quoteSwap(fromSymbol: string, toSymbol: string, amountHuma
     return { kind: 'kuru', market: market.market, side, inputRaw, inputUnits, outputRaw, minOutRaw, bid, ask, pricePrecision: P, sizePrecision: S, from, to }
   }
 
-  if (ask === 0n) throw new Error(`no asks on ${toSymbol}/USDC right now — nothing to buy`)
+  if (ask === 0n || ask >= EMPTY_BOOK) throw new Error(`no asks on ${toSymbol}/USDC right now — nothing to buy`)
   const inputRaw = BigInt(Math.round(amountHuman * 10 ** from.decimals))
   const inputUnits = BigInt(Math.round(amountHuman * Number(P)))
   // spending Q quote to buy base: out(baseRaw) = Q × P/ask × 10^baseDec
