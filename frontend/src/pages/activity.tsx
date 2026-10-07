@@ -109,6 +109,7 @@ function ActivityContent() {
     StreamCancelled: ArrowUpRight, StreamPaused: ArrowUpRight, StreamResumed: ArrowUpRight,
     LinkCreated: ArrowUpRight, LinkClaimed: ArrowDownLeft, LinkRefunded: ArrowDownLeft,
     Wrap: ArrowUpRight, Unwrap: ArrowDownLeft, UsernameRegistered: ArrowUpRight,
+    NativeTransfer: ArrowUpRight,
   }
 
   return <DashboardShell>

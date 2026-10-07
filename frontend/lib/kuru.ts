@@ -13,12 +13,12 @@ import { monadTestnet } from './chain'
 import { cachedRpc } from './rpc'
 import type { GaslessCall } from './gasless'
 
-export const KURU_ROUTER = '0x1f5A250c4A506DA4cE584173c6ed1890B1bf7187'
+export const KURU_ROUTER = '0x7EFbE105Ca7415dE98F96622173458ac1c054630'
 export const KURU_API = (import.meta.env.VITE_KURU_API as string | undefined) ?? 'https://api.testnet.kuru.io'
 
 const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000' as Address
 
-export const KURU_USDC: Address = '0xee0722ead54f1b4fe97be399be43bc0226a6f97e'
+export const KURU_USDC: Address = '0xa402b424f392eaa05dbc8779e4502a1f6a96fef1'
 export const CIRCLE_USDC: Address = '0x534b2f3A21130d7a60830c2Df862319e593943A3'
 
 export interface KuruToken {
@@ -32,10 +32,10 @@ export interface KuruToken {
 export const KURU_TOKENS: KuruToken[] = [
   { symbol: 'MON', name: 'Monad (native)', address: ADDRESS_ZERO, decimals: 18 },
   { symbol: 'WMON', name: 'Wrapped Monad (FluxPay)', address: '0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541', decimals: 18 },
-  { symbol: 'USDC', name: 'Kuru Testnet USDC', address: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', decimals: 6 },
-  { symbol: 'WETH', name: 'Wrapped Ether', address: '0x8b6c5fafef85b030bb1e71ae7ac085cc2380aaf8', decimals: 18 },
-  { symbol: 'XAUT', name: 'Tether Gold', address: '0xee1dce135a9ab598bca8cf3a28bdef6892100740', decimals: 6 },
-  { symbol: 'cbBTC', name: 'Coinbase Wrapped BTC', address: '0xef2a20a161ac9ed1117d721336226b6399f15b4d', decimals: 8 },
+  { symbol: 'USDC', name: 'Kuru Testnet USDC', address: '0xa402b424f392eaa05dbc8779e4502a1f6a96fef1', decimals: 6 },
+  { symbol: 'WETH', name: 'Wrapped Ether', address: '0x63c84e18184021c6cce5ea57d0c3ec0e65f3b303', decimals: 18 },
+  { symbol: 'XAUT', name: 'Tether Gold', address: '0x7553b18a8c8400a1b7746c1f5b4f453d57555838', decimals: 6 },
+  { symbol: 'WBTC', name: 'Wrapped BTC', address: '0x7cdc77b348a2e101c766ad290367f3c5f287af18', decimals: 8 },
 ]
 
 export const kuruTokenBySymbol = (symbol: string) => KURU_TOKENS.find(t => t.symbol === symbol)
@@ -50,10 +50,10 @@ interface DirectMarket {
 }
 
 const DIRECT_MARKETS: DirectMarket[] = [
-  { market: '0xfdbe356828c8f5a5d5ed4f69dde0816f4058ef61', base: ADDRESS_ZERO, quote: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', baseDec: 18, quoteDec: 6 },
-  { market: '0xa9c2936656a7d2143720bcd91ba8506200b7cbe7', base: '0x8b6c5fafef85b030bb1e71ae7ac085cc2380aaf8', quote: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', baseDec: 18, quoteDec: 6 },
-  { market: '0x5bdea6f9f9aba34f4ecb9b865646a792b835ef7f', base: '0xef2a20a161ac9ed1117d721336226b6399f15b4d', quote: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', baseDec: 8, quoteDec: 6 },
-  { market: '0x0b4dd2a7b09d5c5401149ffe51301cc589017343', base: '0xee1dce135a9ab598bca8cf3a28bdef6892100740', quote: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', baseDec: 6, quoteDec: 6 },
+  { market: '0x26cd68436b6a4aeb3ec52abc20a4d121f8b4bac9', base: ADDRESS_ZERO, quote: '0xa402b424f392eaa05dbc8779e4502a1f6a96fef1', baseDec: 18, quoteDec: 6 }, // MON/USDC (currently no orders)
+  { market: '0x9d187971b64505ac81f12c5fd2ac9c5247ec62f3', base: '0x63c84e18184021c6cce5ea57d0c3ec0e65f3b303', quote: '0xa402b424f392eaa05dbc8779e4502a1f6a96fef1', baseDec: 18, quoteDec: 6 }, // WETH/USDC
+  { market: '0x0e2a5d9378fb61b8ec100bd770c449f6fdd3e4d6', base: '0x7553b18a8c8400a1b7746c1f5b4f453d57555838', quote: '0xa402b424f392eaa05dbc8779e4502a1f6a96fef1', baseDec: 6, quoteDec: 6 }, // XAUT/USDC
+  { market: '0x8661cb7c5f4f8ae3ee116b63aa5a23c69110e357', base: '0x7cdc77b348a2e101c766ad290367f3c5f287af18', quote: '0xa402b424f392eaa05dbc8779e4502a1f6a96fef1', baseDec: 8, quoteDec: 6 }, // WBTC/USDC
 ]
 
 const MARKET_ABI = [
@@ -101,7 +101,7 @@ export async function mintKuruUsdc(
 ): Promise<Hash> {
   const { sendGasless } = await import('./gasless')
   const data = encodeFunctionData({
-    abi: ['function mint(address to, uint256 amount)'],
+    abi: [parseAbiItem('function mint(address to, uint256 amount)')],
     functionName: 'mint',
     args: [to, BigInt(Math.round(amountHuman * 10 ** 6))],
   })
@@ -141,10 +141,10 @@ function findMarket(from: Address, to: Address): { market: DirectMarket; side: '
 
 async function marketPrecisions(market: Address): Promise<{ pricePrecision: bigint; sizePrecision: bigint }> {
   const fallback: Record<string, { pricePrecision: bigint; sizePrecision: bigint }> = {
-    '0xfdbe356828c8f5a5d5ed4f69dde0816f4058ef61': { pricePrecision: 1000000n, sizePrecision: 100000000n },
-    '0xa9c2936656a7d2143720bcd91ba8506200b7cbe7': { pricePrecision: 100n, sizePrecision: 10000000000n },
-    '0x5bdea6f9f9aba34f4ecb9b865646a792b835ef7f': { pricePrecision: 100n, sizePrecision: 100000000n },
-    '0x0b4dd2a7b09d5c5401149ffe51301cc589017343': { pricePrecision: 100n, sizePrecision: 1000000n },
+    '0x26cd68436b6a4aeb3ec52abc20a4d121f8b4bac9': { pricePrecision: 1000000n, sizePrecision: 1000000n }, // MON/USDC
+    '0x9d187971b64505ac81f12c5fd2ac9c5247ec62f3': { pricePrecision: 100n, sizePrecision: 10000000000n }, // WETH/USDC
+    '0x0e2a5d9378fb61b8ec100bd770c449f6fdd3e4d6': { pricePrecision: 100n, sizePrecision: 1000000n }, // XAUT/USDC
+    '0x8661cb7c5f4f8ae3ee116b63aa5a23c69110e357': { pricePrecision: 100n, sizePrecision: 100000000n }, // WBTC/USDC
   }
   try {
     const res = await fetch(`${KURU_API}/api/v1/markets`)

@@ -124,6 +124,20 @@ async function fetchBackendActivity(address: string): Promise<ActivityItem[]> {
       case 'batch_settled':
         items.push({ ...base, kind: 'sent', category: 'Payment', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: `${p.count ?? '?'} recipients`, event: 'BatchSettled' })
         break
+      case 'token_transfer': {
+        const from = String(p.from ?? '').toLowerCase()
+        const to = String(p.to ?? '').toLowerCase()
+        const kind = to === addr ? 'received' : 'sent'
+        items.push({ ...base, kind, category: 'Transfer', ...tok(p.tokenLabel), tokenAddress: (p.token as string) ?? null, amount: num(p.amount), counterparty: kind === 'received' ? String(p.from ?? '') : String(p.to ?? ''), event: 'Transfer' })
+        break
+      }
+      case 'native_payment': {
+        const from = String(p.from ?? '').toLowerCase()
+        const to = String(p.to ?? '').toLowerCase()
+        const kind = to === addr ? 'received' : 'sent'
+        items.push({ ...base, kind, category: 'Payment', token: 'MON', tokenAddress: null, amount: num(p.amount), counterparty: kind === 'received' ? String(p.from ?? '') : String(p.to ?? ''), event: 'NativeTransfer' })
+        break
+      }
       case 'username_registered':
         items.push({ ...base, kind: 'received', category: 'Account', counterparty: `@${String(p.username ?? '')}`, event: 'UsernameRegistered' })
         break

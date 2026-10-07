@@ -5,7 +5,7 @@ import { SmartWalletGate } from '@/components/guard'
 import { Dropdown } from '@/components/dropdown'
 import { useWallet } from '@/hooks/useWallet'
 import {
-  executeSwap, fetchKuruBalance, formatQuoteAmount, KURU_TOKENS, kuruProvider, kuruTokenBySymbol, mintKuruUsdc, quoteSwap,
+  executeSwap, fetchKuruBalance, formatQuoteAmount, KURU_TOKENS, kuruProvider, kuruTokenBySymbol, quoteSwap,
   type DirectQuote, type KuruToken,
 } from '@/lib/kuru'
 import { EXPLORER_URL } from '@/lib/chain'
@@ -28,7 +28,7 @@ function SwapContent() {
   const { address, smartAddress, wallet, getWalletClient } = useWallet()
   const money = smartAddress as string
   const [fromSym, setFromSym] = useState('MON')
-  const [toSym, setToSym] = useState('USDC')
+  const [toSym, setToSym] = useState('WMON')
   const [amount, setAmount] = useState('')
   const [slippage, setSlippage] = useState(1)
   const [quote, setQuote] = useState<DirectQuote | null>(null)
@@ -37,8 +37,6 @@ function SwapContent() {
   const [statusMsg, setStatusMsg] = useState('')
   const [error, setError] = useState('')
   const [txHash, setTxHash] = useState<string | null>(null)
-  const [faucetBusy, setFaucetBusy] = useState(false)
-  const [faucetMsg, setFaucetMsg] = useState('')
   const quoteFor = useRef('')
 
   const from = kuruTokenBySymbol(fromSym)!
@@ -54,22 +52,7 @@ function SwapContent() {
       if (alive) setBalances(Object.fromEntries(entries))
     })()
     return () => { alive = false }
-  }, [money, txHash, faucetMsg])
-
-  const faucet = async () => {
-    setFaucetMsg('')
-    setFaucetBusy(true)
-    try {
-      const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('wallet_unavailable')
-      await mintKuruUsdc(walletClient, money as `0x${string}`, money as `0x${string}`, 100)
-      setFaucetMsg('+100 kUSDC minted to your wallet')
-    } catch (e) {
-      setFaucetMsg(shortErr(e))
-    } finally {
-      setFaucetBusy(false)
-    }
-  }
+  }, [money, txHash])
 
   useEffect(() => {
     const key = `${fromSym}-${toSym}-${amount}-${slippage}`
@@ -86,7 +69,12 @@ function SwapContent() {
         setPhase('idle')
       } catch (e) {
         setQuote(null)
-        setError((e as Error).message || 'Quote failed')
+        const msg = (e as Error).message || ''
+        // Unsupported/unfunded pairs shouldn't surface a raw error — on testnet
+        // most Kuru books have no liquidity. Show a clear "no route" message.
+        setError(/no direct Kuru market|no bids|no asks|unsupported pair/i.test(msg)
+          ? 'No route available in the testnet environment for this pair. MON ↔ WMON always works.'
+          : (msg || 'Quote failed'))
         setPhase('idle')
       }
     }, 600)
@@ -144,11 +132,7 @@ function SwapContent() {
     <section className="dashboard-content sn">
       <div className="sn-head">
         <h1>Swap</h1>
-        <div className="ov-welcome-actions">
-          <button className="ov-btn" onClick={faucet} disabled={faucetBusy || !address}>{faucetBusy ? 'Minting…' : 'Faucet: +100 kUSDC'}</button>
-        </div>
       </div>
-      {faucetMsg && <p className="sn-hint" style={{ marginBottom: 10 }}>{faucetMsg}</p>}
 
       <div className="sn-form-wrap">
         <div className="sn-panel">

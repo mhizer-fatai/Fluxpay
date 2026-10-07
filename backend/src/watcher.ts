@@ -27,6 +27,7 @@ const linkClaimedEvent = ev("LinkClaimed", [["linkId", "bytes32", true], ["claim
 const linkRefundedEvent = ev("LinkRefunded", [["linkId", "bytes32", true], ["depositor", "address", true], ["amount", "uint256", false]]);
 const wmonDepositEvent = ev("Deposit", [["dst", "address", true], ["wad", "uint256", false]]);
 const wmonWithdrawalEvent = ev("Withdrawal", [["src", "address", true], ["wad", "uint256", false]]);
+const erc20TransferEvent = ev("Transfer", [["from", "address", true], ["to", "address", true], ["value", "uint256", false]]);
 
 const streamStructAbi = [
   { type: "function", name: "streams", stateMutability: "view", inputs: [{ name: "", type: "uint256" }], outputs: [
@@ -39,6 +40,10 @@ const streamStructAbi = [
 
 const POLL_INTERVAL_MS = 4000;
 const CATCHUP_BLOCKS = 20n;
+// Providers cap eth_getLogs (public Monad RPC = 100 blocks, QuickNode = 1000).
+// Cap each tick's range so a large catch-up can never exceed the limit and fail
+// forever; it drains in bounded windows across ticks instead.
+const MAX_BLOCKS_PER_TICK = 900n;
 
 interface WatchedEvent {
   type: string;
@@ -76,6 +81,7 @@ async function publish(event: WatchedEvent): Promise<void> {
 const TOKEN_DECIMALS: Array<[string | undefined, number]> = [
   [config.contracts.usdc, 6],
   [config.contracts.ausd, 6],
+  [config.contracts.kusdc, 6],
 ];
 function decimalsFor(token: string): number {
   for (const [addr, dec] of TOKEN_DECIMALS) {
@@ -131,6 +137,17 @@ export function startChainWatcher(): void {
     wmon: config.contracts.wmon as Hex | undefined,
   };
 
+  // ERC-20 tokens whose Transfer events we index, so activity covers every
+  // supported asset (not just FluxPay settlements). Native MON is handled
+  // separately — it emits no logs.
+  const TOKEN_CONTRACTS: Array<[string, string | undefined]> = [
+    ["usdc", config.contracts.usdc],
+    ["ausd", config.contracts.ausd],
+    ["weth", config.contracts.weth],
+    ["wmon", config.contracts.wmon],
+    ["kusdc", config.contracts.kusdc],
+  ];
+
   let lastProcessed: bigint | null = null;
   let running = false;
 
@@ -147,16 +164,20 @@ export function startChainWatcher(): void {
 interface LogLike { transactionHash: Hex; blockNumber: bigint; args: Record<string, any> }
 
       const fromBlock = lastProcessed + 1n;
+      // Bound this tick's window (drains a backlog over successive ticks).
+      const toBlock = latest - lastProcessed > MAX_BLOCKS_PER_TICK
+        ? lastProcessed + MAX_BLOCKS_PER_TICK
+        : latest;
 
       const getLogs = async (address: Hex, event: EvDef): Promise<LogLike[]> => {
         try {
           const logs = await publicClient.getLogs({
             address, event: event as never, args: {} as never,
-            fromBlock, toBlock: latest,
+            fromBlock, toBlock,
           });
           return logs as unknown as LogLike[];
         } catch (err) {
-          logger.warn("watcher_logs_failed", { address, error: String(err) });
+          logger.warn("watcher_logs_failed", { address, from: fromBlock.toString(), to: toBlock.toString(), error: String(err) });
           return [];
         }
       };
@@ -176,6 +197,28 @@ interface LogLike { transactionHash: Hex; blockNumber: bigint; args: Record<stri
           payload: { from, token, tokenLabel: tokenLabel(token), amount: fmt(total, token), count: count.toString() },
           txHash: log.transactionHash, blockNumber: log.blockNumber,
         });
+      }
+
+      // Plain ERC-20 transfers for every supported token — covers sends/swaps/faucet
+      // that never touch FluxPay, so Activity shows all assets, not just USDC.
+      // Transfers to/from a FluxPay-family contract are skipped: those already
+      // emit their own specific event (payment_settled, link_*, stream_*), and
+      // indexing the raw Transfer too would double-list them.
+      const family = [C.fluxPay, config.contracts.splitManager, C.linkEscrow, C.streamVault]
+        .filter((a): a is string => Boolean(a))
+        .map(a => a.toLowerCase());
+      for (const [label, tokenAddr] of TOKEN_CONTRACTS) {
+        if (!tokenAddr) continue;
+        for (const log of await getLogs(tokenAddr as Hex, erc20TransferEvent)) {
+          const { from, to, value } = log.args as unknown as { from: string; to: string; value: bigint };
+          if (family.includes(from.toLowerCase()) || family.includes(to.toLowerCase())) continue;
+          await publish({
+            type: "token_transfer",
+            addresses: [from.toLowerCase(), to.toLowerCase()],
+            payload: { from, to, token: tokenAddr, tokenLabel: label, amount: fmt(value, tokenAddr) },
+            txHash: log.transactionHash, blockNumber: log.blockNumber,
+          });
+        }
       }
 
       if (C.registry) {
@@ -297,7 +340,7 @@ interface LogLike { transactionHash: Hex; blockNumber: bigint; args: Record<stri
         }
       }
 
-      lastProcessed = latest;
+      lastProcessed = toBlock;
     } catch (err) {
       logger.warn("watcher_tick_failed", { error: err instanceof Error ? err.message : String(err) });
     } finally {

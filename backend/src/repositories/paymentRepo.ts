@@ -71,6 +71,21 @@ export const paymentRepo = {
     return rows[0] ?? null;
   },
 
+  /**
+   * Native-MON payments involving an address. Native transfers emit no ERC-20
+   * Transfer log, so the on-chain watcher cannot see them; the app's own intent
+   * records are the source. Only non-failed, confirmed/submitted sends.
+   */
+  async listNativeByAddress(address: string, limit: number): Promise<PaymentIntentRow[]> {
+    return query<PaymentIntentRow>(
+      `SELECT ${COLUMNS} FROM payments
+       WHERE asset = 'MON' AND status <> 'failed'
+         AND (from_address = $1 OR to_address = $1)
+       ORDER BY created_at DESC LIMIT $2`,
+      [address.toLowerCase(), Math.min(Math.max(limit, 1), 200)],
+    );
+  },
+
   async transition(
     intentId: string,
     to: PaymentStatus,

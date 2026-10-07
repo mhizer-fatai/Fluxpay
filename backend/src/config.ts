@@ -32,6 +32,7 @@ export const config = {
     weth: process.env.WETH_ADDRESS,
     wmon: process.env.WMON_ADDRESS,
     ausd: process.env.AUSD_ADDRESS,
+    kusdc: process.env.KUSDC_ADDRESS || "0xee0722ead54f1b4fe97be399be43bc0226a6f97e",
     registry: process.env.USERNAME_REGISTRY_ADDRESS,
     fluxPay: process.env.FLUXPAY_ADDRESS,
     splitManager: process.env.SPLIT_MANAGER_ADDRESS,

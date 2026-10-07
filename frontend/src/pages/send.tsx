@@ -28,6 +28,8 @@ interface PendingIntent {
   asset: string
   amount: string
   at: number
+  userOpHash?: string
+  txHash?: string
 }
 
 function loadPending(): PendingIntent[] {
@@ -158,12 +160,64 @@ function SendContent() {
     setIntentId(null); setUserOpHash(null); userOpHashRef.current = null; setConfirmSecs(0); setReceipt(null); setShowReceipt(false); setBusy('')
   }
 
+  // Dismiss the progress/receipt popup. Does NOT cancel the on-chain transaction
+  // (that already reached the bundler) — it just stops tracking it here and
+  // returns to the form; the result stays visible in Activity.
+  const dismiss = () => {
+    if (intentId) savePending(loadPending().filter(p => p.intentId !== intentId))
+    reset()
+  }
+
   // Elapsed-time ticker while waiting for on-chain confirmation.
   useEffect(() => {
     if (step !== 'sending' || !userOpHash) return
     const t = setInterval(() => setConfirmSecs(s => s + 1), 1000)
     return () => clearInterval(t)
   }, [step, userOpHash])
+
+  // Resume an in-flight send after a reload/navigation. The step/success state is
+  // otherwise in-memory and would be lost, so a send that already reached the
+  // bundler would never show its confirmation or receipt.
+  useEffect(() => {
+    const list = loadPending()
+    // Only resume sends that actually reached the bundler (have a userOpHash).
+    // An entry saved before submission isn't actionable and shouldn't trap the UI.
+    const p = [...list].reverse().find(x => x.userOpHash)
+    if (!p) return
+    const meta = TOKENS.find(t => t.key === p.asset)
+    if (!meta) return
+    setAssetSym(p.asset as TokenKey)
+    setRecipient(p.to)
+    setResolvedTo(p.to)
+    setAmount(String(Number(p.amount) / 10 ** meta.decimals))
+    setIntentId(p.intentId)
+    if (p.userOpHash) { userOpHashRef.current = p.userOpHash; setUserOpHash(p.userOpHash) }
+    if (p.txHash) { setTxHash(p.txHash); setStep('success'); return }
+    setStep(p.userOpHash ? 'sending' : 'pending')
+    setBusy(p.userOpHash ? 'Submitted — waiting for on-chain confirmation…' : 'Waiting for your wallet approval…')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Auto-poll a submitted userOp so the completed + receipt screen appears
+  // without the user having to click "Check status".
+  useEffect(() => {
+    if (!userOpHash || (step !== 'sending' && step !== 'pending')) return
+    let cancelled = false
+    const poll = async () => {
+      const r = await getUserOpReceipt(userOpHash as `0x${string}`)
+      if (cancelled || !r) return
+      const tx = r.receipt.transactionHash
+      if (intentId) void patchPaymentIntent(intentId, { status: 'confirmed', txHash: tx }).catch(() => {})
+      savePending(loadPending().filter(p => p.intentId !== intentId))
+      setTxHash(tx)
+      void refreshSmart()
+      setBusy('')
+      setStep('success')
+    }
+    void poll()
+    const t = setInterval(poll, 8000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [userOpHash, step, intentId, refreshSmart])
 
   const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
@@ -277,7 +331,15 @@ function SendContent() {
             void patchPaymentIntent(intentId, { status: 'submitted' }).catch(() => {})
           }
         },
-        onUserOpHash: h => { userOpHashRef.current = h; setUserOpHash(h) },
+        onUserOpHash: h => {
+          userOpHashRef.current = h
+          setUserOpHash(h)
+          // Persist the hash so a reload/navigation mid-send can still resume
+          // confirmation and surface the receipt.
+          const list = loadPending()
+          const i = list.findIndex(p => p.intentId === intentId)
+          if (i >= 0) { list[i] = { ...list[i], userOpHash: h }; savePending(list) }
+        },
       })
       if (intentId) {
         savePending(loadPending().filter(p => p.intentId !== intentId))
@@ -374,24 +436,25 @@ function SendContent() {
             {!canContinue && <p className="sn-hint sn-hint-center">Enter a recipient and a valid amount (≤ balance) to continue.</p>}
           </div>
         </div>
-      ) : (
+      ) : step === 'confirm' ? (
         <div className="sn-card">
-          {step === 'confirm' && (
-            <div className="sn-step">
-              <h2>Confirm Transfer</h2>
-              <div className="sn-summary">{summary}</div>
-              <p className="sn-warning">Transactions on the blockchain cannot be reversed once confirmed. Please verify the recipient before continuing.</p>
-              {error && <p style={{ color: '#ef4444', fontSize: 13 }}>{error}</p>}
-              <div className="sn-actions">
-                <button className="ov-btn" onClick={() => setStep('form')} disabled={!!busy}>Back</button>
-                <button className="ov-btn primary" onClick={confirmSend} disabled={!!busy}>{busy || 'Confirm & Send'}</button>
-              </div>
+          <div className="sn-step">
+            <h2>Confirm Transfer</h2>
+            <div className="sn-summary">{summary}</div>
+            <p className="sn-warning">Transactions on the blockchain cannot be reversed once confirmed. Please verify the recipient before continuing.</p>
+            {error && <p style={{ color: '#ef4444', fontSize: 13 }}>{error}</p>}
+            <div className="sn-actions">
+              <button className="ov-btn" onClick={() => setStep('form')} disabled={!!busy}>Back</button>
+              <button className="ov-btn primary" onClick={confirmSend} disabled={!!busy}>{busy || 'Confirm & Send'}</button>
             </div>
-          )}
-
+          </div>
+        </div>
+      ) : (
+        <div className="pl-modal-backdrop">
+          <div className={`pl-modal${step === 'success' ? ' pl-modal-center' : ''}`}>
           {step === 'sending' && (
             <div className="sn-step">
-              <h2>{userOpHash ? 'Confirming…' : 'Sending…'}</h2>
+              <h2>{userOpHash ? 'Transaction in progress' : 'Waiting for approval'}</h2>
               <p className="sn-hint">{busy || 'Waiting for confirmation on Monad…'}</p>
               <div className="sn-summary">
                 <div className="sn-sum-row"><span>Amount</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
@@ -406,6 +469,9 @@ function SendContent() {
               {userOpHash
                 ? <p className="sn-hint">Submitted to the bundler — your funds are safe. You can leave this page; the result will appear in Activity.</p>
                 : <p className="sn-hint">Waiting for your wallet approval…</p>}
+              <div className="sn-actions" style={{ marginTop: 12 }}>
+                <button className="ov-btn" onClick={dismiss}>Cancel</button>
+              </div>
             </div>
           )}
 
@@ -423,6 +489,7 @@ function SendContent() {
               {error && <p style={{ color: '#ef4444', fontSize: 13 }}>{error}</p>}
               <div className="sn-actions">
                 <button className="ov-btn primary" onClick={checkStatus} disabled={checking}>{checking ? 'Checking…' : 'Check status'}</button>
+                <button className="ov-btn" onClick={dismiss}>Cancel</button>
                 <Link className="ov-btn" to="/activity">View Activity</Link>
               </div>
             </div>
@@ -431,7 +498,7 @@ function SendContent() {
           {step === 'success' && (
             <div className="sn-step sn-success">
               <span className="sn-success-icon"><Check size={22} /></span>
-              <h2>Transfer confirmed</h2>
+              <h2>Transaction successful</h2>
               <p className="sn-success-amount">{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</p>
               <p className="sn-success-sub">sent to {resolvedTo ? shortAddr(resolvedTo) : recipient} · confirmed on Monad Testnet.</p>
               <div className="sn-summary">
@@ -453,11 +520,13 @@ function SendContent() {
                 </div>
               )}
               <div className="sn-actions" style={{ marginTop: 12 }}>
+                <button className="ov-btn" onClick={dismiss}>Close</button>
                 <button className="ov-btn" onClick={reset}>Send Again</button>
                 <Link className="ov-btn primary" to="/wallet">Back to Wallet</Link>
               </div>
             </div>
           )}
+          </div>
         </div>
       )}
 

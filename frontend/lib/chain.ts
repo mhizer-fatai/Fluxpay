@@ -98,7 +98,7 @@ export const TOKENS: TokenInfo[] = [
   { key: 'AUSD', symbol: 'AUSD', name: 'Aperture USD', decimals: 6, address: import.meta.env.VITE_AUSD_ADDRESS as Address, stable: true },
   { key: 'WETH', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, address: import.meta.env.VITE_WETH_ADDRESS as Address, stable: false },
   { key: 'WMON', symbol: 'WMON', name: 'Wrapped Monad', decimals: 18, address: import.meta.env.VITE_WMON_ADDRESS as Address, stable: false },
-  { key: 'KUSDC', symbol: 'kUSDC', name: 'Kuru Testnet USDC', decimals: 6, address: '0xee0722ead54f1b4fe97be399be43bc0226a6f97e', stable: true },
+  { key: 'KUSDC', symbol: 'kUSDC', name: 'Kuru Testnet USDC', decimals: 6, address: '0xa402b424f392eaa05dbc8779e4502a1f6a96fef1', stable: true },
 ]
 
 export const tokenByKey = (key: TokenKey) => TOKENS.find(t => t.key === key)!
