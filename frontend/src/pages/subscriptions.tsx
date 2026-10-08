@@ -18,8 +18,11 @@ export default function SubscriptionsPage() {
 }
 
 function SubscriptionsContent() {
-  const { smartAddress, getWalletClient } = useWallet()
-  // Smart account only — no EOA merge. Gate above guarantees non-null.
+  // `smartAddress` is the money account used for reads (streams/balances).
+  // `ownerAddress` (the EOA) is the signer — sendGasless derives the smart
+  // account from it. Passing the smart account here would derive a nested,
+  // fundless account and every write would revert.
+  const { address: ownerAddress, smartAddress, getWalletClient } = useWallet()
   const address = smartAddress as string
   const [streams, setStreams] = useState<StreamRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -67,12 +70,13 @@ function SubscriptionsContent() {
 
   const submitCalls = async (calls: GaslessCall[], statusMsg: string) => {
     if (!address) throw new Error('Wallet not ready')
+    if (!ownerAddress) throw new Error('Wallet not ready')
     const walletClient = await getWalletClient()
     if (!walletClient) throw new Error('wallet_unavailable')
     setBusy(statusMsg)
     const result = await sendGasless({
       walletClient,
-      ownerAddress: address as `0x${string}`,
+      ownerAddress: ownerAddress as `0x${string}`,
       calls,
       onStatus: s => {
         if (s === 'signing') setBusy('Confirm in your wallet…')

@@ -125,14 +125,28 @@ export async function sendGasless(opts: {
   opts.onStatus?.('signing')
   // Bounded submit: Privy popup approvals that never resolve (popup blockers,
   // Brave Shields, closed popups) must surface as errors, not hang forever.
-  const userOpHash = await Promise.race([
-    smartAccountClient.sendTransaction({
-      calls: opts.calls.map(c => ({ to: c.to, data: c.data ?? '0x', value: c.value ?? 0n })),
-    }),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Signing/submission timed out after 90s — the wallet approval may not have completed.')), 90_000),
-    ),
-  ])
+  let userOpHash: Hash
+  try {
+    userOpHash = await Promise.race([
+      smartAccountClient.sendTransaction({
+        calls: opts.calls.map(c => ({ to: c.to, data: c.data ?? '0x', value: c.value ?? 0n })),
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Signing/submission timed out after 90s — the wallet approval may not have completed.')), 90_000),
+      ),
+    ])
+  } catch (err) {
+    // Diagnostic: on a submit/simulation failure, log exactly what was sent so
+    // the revert can be traced (which calls, which selectors, full message).
+    if (import.meta.env.DEV) {
+      const summary = opts.calls.map(c => `${c.to}${(c.data ?? '0x').slice(0, 10)}`).join(',')
+      const msg = (err as { shortMessage?: string }).shortMessage
+        ?? (err as { details?: string }).details
+        ?? (err instanceof Error ? err.message : String(err))
+      console.error(`[gasless] submit failed | account=${account.address} | owner=${opts.ownerAddress} | calls=[${summary}] | ${msg}`)
+    }
+    throw err
+  }
   opts.onStatus?.('submitted')
   // Surfaced immediately: with this hash anyone can look the operation up in
   // Pimlico's User Operation Logs or query its receipt directly.
