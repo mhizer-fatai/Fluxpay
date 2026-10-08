@@ -2,10 +2,10 @@ import { Link } from 'react-router-dom'
 import { ChevronsRight } from 'lucide-react'
 
 const features = [
-  ['Pay', 'Send, request, and split money using a @username, a QR code, or a link you can share anywhere.'],
+  ['Swap', 'Trade tokens at live on-chain prices. On testnet, swap MON to WMON 1:1.'],
+  ['Send', 'Send and request money using a @username, a QR code, or a link you can share anywhere.'],
   ['Streams', 'Pick an amount to flow per second, fund it once, and let it run — pause, resume, or cancel in a tap.'],
   ['Activity', 'A live feed of every payment and stream tick, pulled straight from Monad.'],
-  ['Sign in, done', 'Log in with Face ID, Google, or email. No seed phrase, no gas token, no extension — your keys stay on your device.'],
 ]
 
 const images = [
@@ -29,10 +29,10 @@ export default function LandingPage() {
           <a href="#faqs">FAQs</a>
         </nav>
       </div>
-      <div><h1>Send. <span className="text-orange">Split.</span><br/>Stream.</h1><p>FluxPay is a payments app on Monad. Open it, get a balance, and send money to a friend by their @username — split a bill without the group-chat math, or set a payment to trickle every second. No addresses to copy, no gas to buy, no seed phrase to lose.</p><div className="hero-actions"><Link to="/auth" className="lime-button">Join FluxPay</Link></div></div>
+      <div><h1>Swap. <span className="text-orange">Send.</span><br/>Stream.</h1><p>FluxPay is a payments app on Monad. Swap tokens at live on-chain prices, send money to a friend by their @username, or set a payment to trickle every second — with no addresses to copy, no gas to buy, and no seed phrase to lose.</p><div className="hero-actions"><Link to="/auth" className="lime-button">Join FluxPay</Link></div></div>
       <div className="hero-cards"><div className="card-ghost">fluxpay <span>◉</span></div><div className="card-dark">fluxpay <span>◉</span></div><div className="card-lime">fluxpay <span>◉</span></div></div>
     </section>
-    <section className="landing-intro"><small className="feature-pill">FEATURES</small><h2>A money app that hides the chain.</h2><p className="intro-text">FluxPay sits in front of Monad's speed and keeps the plumbing out of the way. Sign in, get a balance, and start moving money — sending, splitting, or streaming — in seconds.</p></section>
+    <section className="landing-intro"><small className="feature-pill">FEATURES</small><h2>A money app that hides the chain.</h2><p className="intro-text">FluxPay sits in front of Monad's speed and keeps the plumbing out of the way. Sign in, get a balance, and start swapping, sending, and streaming — in seconds.</p></section>
     <section id="features" className="feature-grid">{features.map(([title, text], i) => <article key={title} className={`feature-tile tile-${i}`}><img src={images[i]} alt={title} className="feature-img" /><div className="tile-body"><h3>{title}</h3><p>{text}</p><a href="#pricing">Learn more <ChevronsRight size={14} /></a></div></article>)}</section>
     <section className="landing-intro second"><small className="feature-pill">OUR MISSION</small><h2>Payments should be as easy as a group chat.</h2><p>Stablecoins can move in seconds, but the usual experience is a maze of wallets, gas, and long addresses. FluxPay removes it: one smart account per person, fees covered for you, usernames in place of addresses, and settlement on Monad fast enough to watch happen.</p></section>
     <section className="landing-hero orange">
@@ -47,7 +47,7 @@ export default function LandingPage() {
     <footer className="landing-footer">
       <div className="footer-brand">
         <div className="wordmark">fluxpay</div>
-        <p>A consumer payments app on Monad — send, split, and stream.</p>
+        <p>A consumer payments app on Monad — swap, send, and stream.</p>
       </div>
       <div className="footer-cols">
         <div className="footer-col">

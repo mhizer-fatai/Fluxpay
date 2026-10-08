@@ -29,6 +29,7 @@ function SubscriptionsContent() {
   const [addOpen, setAddOpen] = useState(false)
   const [detail, setDetail] = useState<StreamRow | null>(null)
   const [busy, setBusy] = useState('')
+  const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [form, setForm] = useState({ recipient: '', amount: '', asset: 'USDC' as TokenKey, months: 1 })
 
@@ -80,14 +81,19 @@ function SubscriptionsContent() {
       calls,
       onStatus: s => {
         if (s === 'signing') setBusy('Confirm in your wallet…')
-        else if (s === 'submitted' || s === 'confirmed') setBusy('Confirming…')
+        else if (s === 'submitted') setBusy('Submitted — waiting for confirmation on Monad…')
+        else setBusy('Confirming on Monad…')
       },
+      // Show the hash the moment the bundler accepts it, so there is visible
+      // feedback while the operation waits for on-chain confirmation.
+      onUserOpHash: h => setBusy(`Submitted (${h.slice(0, 12)}…) — waiting for confirmation on Monad…`),
     })
     return result.txHash
   }
 
   const createStream = async () => {
     setError('')
+    setNotice('')
     if (!address) return
     const amount = Number(form.amount)
     if (!(amount > 0)) return setError('Enter a valid monthly amount')
@@ -123,10 +129,21 @@ function SubscriptionsContent() {
       )
       setAddOpen(false)
       setForm({ recipient: '', amount: '', asset: 'USDC', months: 1 })
+      setNotice('Stream created')
       void refresh(true)
     } catch (e) {
       const err = e as Error & { shortMessage?: string }
-      setError(err.shortMessage || err.message || 'Failed to create stream')
+      const msg = err.shortMessage || err.message || 'Failed to create stream'
+      // A receipt-wait timeout is NOT a failure — the userOp may still land
+      // (Monad testnet bundlers are slow to report inclusion). Treat it as
+      // "still confirming", close the modal and refresh the list.
+      if (/Timed out while waiting|Still waiting on confirmation/i.test(msg)) {
+        setAddOpen(false)
+        setNotice('Submitted — still confirming on Monad. Refresh in a moment and it will appear below.')
+        void refresh(true)
+      } else {
+        setError(msg)
+      }
     } finally {
       setBusy('')
     }
@@ -147,7 +164,15 @@ function SubscriptionsContent() {
       void refresh(true)
     } catch (e) {
       const err = e as Error & { shortMessage?: string }
-      setError(err.shortMessage || err.message || 'Action failed')
+      const msg = err.shortMessage || err.message || 'Action failed'
+      // Receipt-wait timeout is not a failure: the userOp may still land.
+      if (/Timed out while waiting|Still waiting on confirmation/i.test(msg)) {
+        setDetail(null)
+        setNotice('Submitted — still confirming on Monad. Refresh in a moment to see the result.')
+        void refresh(true)
+      } else {
+        setError(msg)
+      }
     } finally {
       setBusy('')
     }
@@ -190,7 +215,7 @@ function SubscriptionsContent() {
         <div className="ov-stat"><small>Total Funded</small><strong>{money(funded)}</strong><em>deposited by you</em></div>
       </div>
 
-      {(busy || error) && <p style={{ fontSize: 13, margin: '8px 0' }}>{busy}{error && <span style={{ color: '#ef4444' }}> {error}</span>}</p>}
+      {(busy || error || notice) && <p style={{ fontSize: 13, margin: '8px 0' }}>{busy}{notice && !error && <span style={{ color: '#16a34a' }}> {notice}</span>}{error && <span style={{ color: '#ef4444' }}> {error}</span>}</p>}
 
       <div className="su-card">
         <div className="su-section-head">
@@ -237,6 +262,7 @@ function SubscriptionsContent() {
             <span>Upfront cost (amount × months + gas)</span>
             <strong>{((parseFloat(form.amount) || 0) * Math.max(1, Math.floor(form.months))).toFixed(2)} {form.asset}</strong>
           </div>
+          {busy && <p style={{ color: '#6b7280', fontSize: 12 }}>{busy}</p>}
           {error && <p style={{ color: '#ef4444', fontSize: 12 }}>{error}</p>}
           <div className="su-modal-actions">
             <button className="ov-btn" onClick={() => setAddOpen(false)} disabled={!!busy}>Cancel</button>
