@@ -545,6 +545,9 @@ button,a,input,select,textarea { font:inherit; } a { color:inherit; text-decorat
 .pl-optional{font-weight:400;color:#a1a5a6}
 .pl-field input{width:100%;height:40px;border:1px solid #ddd;border-radius:var(--radius-ui);padding:8px 12px;font-size:13px;color:var(--ink);background:#f6f7f8}
 .pl-field input:focus{outline:none;border:1px solid var(--lime)}
+.pl-asset-toggle{display:flex;gap:2px;background:#f4f5f5;border:1px solid var(--line);border-radius:var(--radius-ui);padding:3px}
+.pl-asset-toggle button{flex:1;border:0;background:transparent;font-size:12px;font-weight:600;color:#767b78;padding:8px 10px;border-radius:var(--radius-ui);cursor:pointer;transition:background .18s,color .18s}
+.pl-asset-toggle button.on{background:#111;color:#fff}
 .pl-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap}
 .pl-actions-center{justify-content:center}
 .pl-created{margin-bottom:18px}

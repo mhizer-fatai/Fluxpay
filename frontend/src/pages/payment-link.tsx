@@ -5,7 +5,7 @@ import { DashboardShell } from '@/components/dashboard-shell'
 import { SmartWalletGate } from '@/components/guard'
 import { QrCode } from '@/components/qr-code'
 import { useWallet } from '@/hooks/useWallet'
-import { TOKENS, explorerTx, tokenByAddress } from '@/lib/chain'
+import { TOKENS, explorerTx, tokenByAddressOrNative, NATIVE_TOKEN_ADDRESS } from '@/lib/chain'
 import { createPaymentLink, fetchMyLinks, type PaymentLinkDto } from '@/lib/api'
 import { linkUrl } from '@/lib/links'
 import { money, timeAgo } from '@/lib/format'
@@ -13,11 +13,18 @@ import { money, timeAgo } from '@/lib/format'
 const USDC = TOKENS.find(t => t.key === 'USDC')!
 
 const amountOf = (l: PaymentLinkDto) => {
-  const decimals = tokenByAddress(l.token)?.decimals ?? 6
+  const decimals = tokenByAddressOrNative(l.token)?.decimals ?? 6
   return Number(BigInt(l.amount)) / 10 ** decimals
 }
-const symbolOf = (l: PaymentLinkDto) => tokenByAddress(l.token)?.symbol ?? 'USDC'
+const symbolOf = (l: PaymentLinkDto) => tokenByAddressOrNative(l.token)?.symbol ?? 'USDC'
 const createdTs = (l: PaymentLinkDto) => Math.floor(new Date(l.createdAt).getTime() / 1000)
+
+/** Exact decimal-string → raw units (float math loses precision at 18 decimals). */
+const toRawAmount = (human: string, decimals: number): bigint => {
+  const [whole = '0', ...rest] = human.split('.')
+  const frac = (rest.join('') + '0'.repeat(decimals)).slice(0, decimals)
+  return BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(frac || '0')
+}
 
 export default function PaymentLinkPage() {
   return <SmartWalletGate><PaymentLinkContent /></SmartWalletGate>
@@ -39,7 +46,7 @@ function PaymentLinkContent() {
   const [copied, setCopied] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ title: '', amount: '', description: '' })
+  const [form, setForm] = useState({ title: '', amount: '', description: '', asset: 'USDC' as 'MON' | 'USDC' })
 
   const refresh = useCallback(async () => {
     if (!address) return
@@ -74,21 +81,22 @@ function PaymentLinkContent() {
   const createLink = async () => {
     setError('')
     if (!address) return setError('Wallet not ready')
-    const amount = Number(form.amount.replace(/[^0-9.]/g, ''))
+    const clean = form.amount.replace(/[^0-9.]/g, '')
+    const amount = Number(clean)
     if (!form.title.trim() || !amount || amount <= 0) return setError('Enter a title and a valid amount')
     setBusy('Creating link…')
     try {
-      const rawAmount = BigInt(Math.round(amount * 10 ** USDC.decimals)).toString()
+      const asset = form.asset === 'MON' ? TOKENS.find(t => t.key === 'MON')! : USDC
       const link = await createPaymentLink({
         creatorAddress: address,
         title: form.title.trim(),
         description: form.description.trim(),
-        token: USDC.address!,
-        amountRaw: rawAmount,
+        token: asset.address ?? NATIVE_TOKEN_ADDRESS,
+        amountRaw: toRawAmount(clean, asset.decimals).toString(),
       })
       setGenerated(link)
       setCreateOpen(false)
-      setForm({ title: '', amount: '', description: '' })
+      setForm({ title: '', amount: '', description: '', asset: 'USDC' })
       void refresh()
     } catch (e) {
       const err = e as Error & { status?: number }
@@ -108,8 +116,9 @@ function PaymentLinkContent() {
 
   const totals = {
     created: links.length,
-    pendingUsd: links.filter(l => statusOf(l) === 'Pending').reduce((s, l) => s + amountOf(l), 0),
-    paidUsd: links.filter(l => statusOf(l) === 'Paid').reduce((s, l) => s + amountOf(l), 0),
+    // Dollar metrics only count stablecoins — MON amounts are not USD.
+    pendingUsd: links.filter(l => statusOf(l) === 'Pending' && tokenByAddressOrNative(l.token)?.stable).reduce((s, l) => s + amountOf(l), 0),
+    paidUsd: links.filter(l => statusOf(l) === 'Paid' && tokenByAddressOrNative(l.token)?.stable).reduce((s, l) => s + amountOf(l), 0),
   }
   const metrics = [
     { label: 'Links Created', value: String(totals.created) },
@@ -168,7 +177,15 @@ function PaymentLinkContent() {
         <div className="pl-modal" onClick={e => e.stopPropagation()}>
           <div className="pl-modal-head"><h2>Create Payment Link</h2><button className="pl-close" onClick={() => !busy && setCreateOpen(false)} aria-label="Close"><X size={16} /></button></div>
           <div className="pl-field"><label>Payment title</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Website Design" /></div>
-          <div className="pl-field"><label>Amount (USDC)</label><input value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="100.00" inputMode="decimal" /></div>
+          <div className="pl-field">
+            <label>Asset</label>
+            <div className="pl-asset-toggle">
+              {(['USDC', 'MON'] as const).map(a => (
+                <button key={a} type="button" className={form.asset === a ? 'on' : ''} onClick={() => setForm({ ...form, asset: a })}>{a}</button>
+              ))}
+            </div>
+          </div>
+          <div className="pl-field"><label>Amount ({form.asset})</label><input value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder={form.asset === 'MON' ? '1.00' : '100.00'} inputMode="decimal" /></div>
           <div className="pl-field"><label>Description</label><input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="What is this for?" /></div>
           {error && <p style={{ color: '#ef4444', fontSize: 12 }}>{error}</p>}
           <div className="pl-modal-actions">

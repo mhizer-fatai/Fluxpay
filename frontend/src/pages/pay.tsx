@@ -1,19 +1,18 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ExternalLink } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Wallet } from 'lucide-react'
 import type { Address } from 'viem'
-import { usePrivy } from '@privy-io/react-auth'
-import { useWallet } from '@/hooks/useWallet'
-import { explorerTx, tokenByAddress } from '@/lib/chain'
+import { erc20Abi, explorerTx, monadTestnet, publicClient, tokenByAddressOrNative } from '@/lib/chain'
 import { fetchLink, recordLinkPaid, type PaymentLinkDto } from '@/lib/api'
 import { parseLinkUrl } from '@/lib/links'
-import { buildSettleCalls, sendGasless } from '@/lib/gasless'
+import { shortAddr } from '@/lib/format'
+import { useInjectedWallet } from '@/hooks/useInjectedWallet'
 
 type Phase = 'loading' | 'ready' | 'paying' | 'done' | 'error'
 
 export default function PayPage() {
-  const { login, authenticated, ready } = usePrivy()
-  const { address, smartAddress, getWalletClient } = useWallet()
+  // The payer uses their own browser wallet — never the FluxPay smart account.
+  const { address, chainId, connecting, connect, ensureChain, getWalletClient } = useInjectedWallet()
   const [link, setLink] = useState<PaymentLinkDto | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
   const [txHash, setTxHash] = useState<string | null>(null)
@@ -39,32 +38,60 @@ export default function PayPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const pay = async () => {
-    // Payer identity is the smart account; `address` (EOA) signs invisibly.
-    if (!link || !smartAddress) return
+  const connectWallet = async () => {
     try {
       setError('')
-      const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('Wallet unavailable — log in first.')
+      await connect()
+    } catch (e) {
+      const err = e as Error & { shortMessage?: string }
+      setError(err.shortMessage || err.message || 'Could not connect wallet')
+    }
+  }
+
+  const pay = async () => {
+    if (!link) return
+    try {
+      setError('')
+      // Single-use: re-check right before sending so an already-paid link can't be paid twice.
+      const fresh = await fetchLink(link.id)
+      setLink(fresh)
+      if (fresh.status !== 'pending') {
+        setPhase('done')
+        return
+      }
+
+      const payer = address ?? (await connect())
+      if (!payer) return
+      await ensureChain()
+
+      const token = tokenByAddressOrNative(fresh.token)
+      if (!token) throw new Error('Unsupported token on this link')
+      const amountRaw = BigInt(fresh.amount)
+      const client = await getWalletClient()
+
       setPhase('paying')
-      const token = tokenByAddress(link.token)
-      if (!token || !token.address) throw new Error('Unsupported token on this link')
-      const amountHuman = Number(BigInt(link.amount)) / 10 ** token.decimals
-      const calls = buildSettleCalls({
-        token,
-        amountHuman,
-        to: link.creatorAddress as Address,
-      })
-      const result = await sendGasless({
-        walletClient,
-        ownerAddress: address as `0x${string}`,
-        calls,
-        onStatus: () => setPhase('paying'),
-      })
-      // Record on the backend (verifies the tx on-chain, flips pending→paid once).
-      const updated = await recordLinkPaid(link.id, { txHash: result.txHash, payerAddress: smartAddress as string })
+      // Straight from the payer's wallet to the recipient — no FluxPay account involved.
+      const hash = token.address
+        ? await client.writeContract({
+            account: payer,
+            chain: monadTestnet,
+            address: token.address,
+            abi: erc20Abi,
+            functionName: 'transfer',
+            args: [fresh.creatorAddress as Address, amountRaw],
+          })
+        : await client.sendTransaction({
+            account: payer,
+            chain: monadTestnet,
+            to: fresh.creatorAddress as Address,
+            value: amountRaw,
+          })
+
+      setTxHash(hash)
+      await publicClient.waitForTransactionReceipt({ hash })
+      // Backend verifies the tx on-chain and flips the link pending→paid exactly once.
+      const updated = await recordLinkPaid(fresh.id, { txHash: hash, payerAddress: payer })
       setLink(updated)
-      setTxHash(result.txHash)
       setPhase('done')
     } catch (e) {
       setPhase('ready')
@@ -73,11 +100,12 @@ export default function PayPage() {
     }
   }
 
-  const tokenMeta = link ? tokenByAddress(link.token) : null
+  const tokenMeta = link ? tokenByAddressOrNative(link.token) : null
   const decimals = tokenMeta?.decimals ?? 6
   const amountLabel = link ? (Number(BigInt(link.amount)) / 10 ** decimals).toLocaleString('en-US', { maximumFractionDigits: 6 }) : '—'
   const symbol = tokenMeta?.symbol ?? 'tokens'
   const paid = link?.status === 'paid'
+  const wrongChain = address !== null && chainId !== null && chainId !== monadTestnet.id
 
   return (
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#0E0E10', color: '#fff', padding: 24 }}>
@@ -101,29 +129,33 @@ export default function PayPage() {
             <p style={{ margin: '10px 0 0', fontSize: 40, fontWeight: 800 }}>{amountLabel}<em style={{ fontSize: 14, color: '#999', marginLeft: 8, fontStyle: 'normal' }}>{symbol}</em></p>
             {link.description && <p style={{ color: '#999', fontSize: 13, marginTop: 6 }}>{link.description}</p>}
 
-            {!authenticated && (
+            {!address ? (
               <button
-                onClick={() => login()}
-                disabled={!ready}
-                style={{ marginTop: 20, width: '100%', padding: '12px 0', borderRadius: 12, border: 'none', background: '#D35A44', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                onClick={connectWallet}
+                disabled={connecting}
+                style={{ marginTop: 20, width: '100%', padding: '12px 0', borderRadius: 12, border: 'none', background: '#D35A44', color: '#fff', fontWeight: 700, cursor: connecting ? 'wait' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
               >
-                Log in to pay
+                <Wallet size={15} /> {connecting ? 'Connecting…' : 'Connect Wallet'}
               </button>
-            )}
-
-            {authenticated && (
+            ) : (
               <button
                 onClick={pay}
-                disabled={phase !== 'ready' || !smartAddress}
+                disabled={phase !== 'ready'}
                 style={{ marginTop: 20, width: '100%', padding: '12px 0', borderRadius: 12, border: 'none', background: '#D35A44', color: '#fff', fontWeight: 700, cursor: phase === 'ready' ? 'pointer' : 'wait' }}
               >
-                {phase === 'paying' ? 'Paying…' : !smartAddress ? 'Setting up wallet…' : `Pay ${amountLabel} ${symbol}`}
+                {phase === 'paying' ? 'Paying…' : `Pay ${amountLabel} ${symbol}`}
               </button>
             )}
 
+            {address && (
+              <p style={{ marginTop: 10, fontSize: 11, color: '#777' }}>
+                Paying from <span style={{ color: '#bbb' }}>{shortAddr(address)}</span>
+                {wrongChain && <span style={{ color: '#f59e0b' }}> · wrong network — you'll be asked to switch to Monad Testnet</span>}
+              </p>
+            )}
             {error && <p style={{ marginTop: 10, color: '#ef4444', fontSize: 12 }}>{error}</p>}
             <p style={{ marginTop: 16, fontSize: 11, color: '#666' }}>
-              Paying sends {symbol} straight to the recipient's wallet. Links are single-use.
+              Paying sends {symbol} from your own wallet straight to the recipient. Links are single-use.
             </p>
           </>
         )}

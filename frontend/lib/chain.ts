@@ -104,6 +104,13 @@ export const TOKENS: TokenInfo[] = [
 export const tokenByKey = (key: TokenKey) => TOKENS.find(t => t.key === key)!
 export const tokenByAddress = (addr: string) => TOKENS.find(t => t.address && t.address.toLowerCase() === addr.toLowerCase())
 
+/** Zero address is the sentinel for native MON in payment links (MON has no token contract). */
+export const NATIVE_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000000'
+export const isNativeToken = (addr: string) => addr.toLowerCase() === NATIVE_TOKEN_ADDRESS
+/** Resolve a payment-link token address — the zero address maps to native MON. */
+export const tokenByAddressOrNative = (addr: string): TokenInfo | undefined =>
+  isNativeToken(addr) ? tokenByKey('MON') : tokenByAddress(addr)
+
 const erc20AbiBase = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
   { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint8' }] },

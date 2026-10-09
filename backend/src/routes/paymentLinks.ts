@@ -71,11 +71,13 @@ const paidSchema = z.object({
   payerAddress: addressSchema,
 });
 
-/** POST /api/v1/payment-links/:id/paid — verify tx on-chain, flip pending→paid once. */
+/**
+ * POST /api/v1/payment-links/:id/paid — verify tx on-chain, flip pending→paid once.
+ * Public: the payer pays from their own browser wallet and has no FluxPay account.
+ * Safety comes from on-chain verification, not from auth.
+ */
 paymentLinkRouter.post(
   "/:id/paid",
-  requireAuth,
-  attachAuthToContext,
   validate({ body: paidSchema }),
   async (req, res, next) => {
     try {

@@ -2,6 +2,8 @@ import { decodeEventLog, type Hex } from "viem";
 import { AppError, notFound } from "../lib/errors.js";
 import { paymentLinkRepo, type PaymentLinkRow } from "../repositories/paymentLinkRepo.js";
 import { publicClient } from "../chain.js";
+import { config } from "../config.js";
+import { paymentService } from "./paymentService.js";
 
 export interface PaymentLinkDto {
   id: string;
@@ -52,15 +54,63 @@ const transferAbi = [
   },
 ] as const;
 
+/** Zero address is the sentinel for native MON in payment links (MON has no token contract). */
+const NATIVE_TOKEN = "0x0000000000000000000000000000000000000000";
+
+interface TraceCall {
+  type?: string;
+  from?: string;
+  to?: string;
+  value?: string;
+  calls?: TraceCall[];
+}
+
+/** Raw JSON-RPC call for debug_traceTransaction — viem doesn't type debug_* methods. */
+async function traceTransaction(txHash: string): Promise<TraceCall | null> {
+  try {
+    const res = await fetch(config.chain.rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "debug_traceTransaction",
+        params: [txHash, { tracer: "callTracer" }],
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const json = (await res.json()) as { result?: TraceCall };
+    return json.result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Native MON moves inside the userOp's call tree and emits no ERC-20 log, so walk
+ * the callTracer output for a value transfer from the payer to the creator.
+ */
+function traceHasNativePayment(call: TraceCall, payer: string, creator: string, expectedRaw: bigint): boolean {
+  const from = (call.from ?? "").toLowerCase();
+  const to = (call.to ?? "").toLowerCase();
+  if (from === payer && to === creator) {
+    const value = call.value && call.value !== "0x" ? BigInt(call.value) : 0n;
+    if (value >= expectedRaw) return true;
+  }
+  return (call.calls ?? []).some((child) => traceHasNativePayment(child, payer, creator, expectedRaw));
+}
+
 /**
  * Verify a payment tx actually paid `creator` at least `expectedRaw` of `token`,
- * either through FluxPay.settle or a direct ERC-20 transfer in the same receipt.
+ * either through FluxPay.settle or a direct transfer in the same receipt. Native
+ * MON links are verified from the userOp call trace instead (no token logs).
  */
 async function verifyPaymentTx(
   txHash: string,
   creator: string,
   token: string,
   expectedRaw: bigint,
+  payer: string,
 ): Promise<boolean> {
   let receipt;
   try {
@@ -71,6 +121,12 @@ async function verifyPaymentTx(
   if (receipt.status !== "success") return false;
   const creatorLower = creator.toLowerCase();
   const tokenLower = token.toLowerCase();
+
+  if (tokenLower === NATIVE_TOKEN) {
+    const trace = await traceTransaction(txHash);
+    return trace ? traceHasNativePayment(trace, payer.toLowerCase(), creatorLower, expectedRaw) : false;
+  }
+
   for (const log of receipt.logs) {
     try {
       const decoded = decodeEventLog({ abi: paymentSettledAbi, data: log.data, topics: log.topics });
@@ -143,13 +199,32 @@ export const paymentLinkService = {
     if (row.status !== "pending") {
       throw new AppError(`link is already ${row.status}`, 409, "link_not_payable");
     }
-    const ok = await verifyPaymentTx(input.txHash, row.creator_address, row.token, BigInt(row.amount));
+    const ok = await verifyPaymentTx(input.txHash, row.creator_address, row.token, BigInt(row.amount), input.payerAddress);
     if (!ok) {
       throw new AppError("transaction does not pay this link", 400, "payment_not_verified");
     }
     const flipped = await paymentLinkRepo.markPaid(input.id, input.txHash, input.payerAddress);
     if (!flipped) {
       throw new AppError("link is already paid", 409, "link_not_payable");
+    }
+    // Native MON emits no ERC-20 logs, so record an intent for the Activity feed.
+    // Idempotent (key = link id) and best-effort: the link is already marked paid.
+    if (row.token.toLowerCase() === NATIVE_TOKEN) {
+      try {
+        const intent = await paymentService.createIntent({
+          idempotencyKey: `link:${row.id}`,
+          fromAddress: input.payerAddress,
+          toAddress: row.creator_address,
+          asset: "MON",
+          amount: row.amount,
+        });
+        if (intent.status === "created") {
+          await paymentService.updateIntent(intent.intentId, "submitted", { txHash: input.txHash });
+          await paymentService.updateIntent(intent.intentId, "confirmed", { txHash: input.txHash });
+        }
+      } catch {
+        /* activity record is best-effort */
+      }
     }
     return toDto(flipped);
   },
