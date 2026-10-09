@@ -184,6 +184,20 @@ button,a,input,select,textarea { font:inherit; } a { color:inherit; text-decorat
 .po-pause:hover{border-color:#d32f2f;color:#d32f2f}
 @media(max-width:900px){.po-metrics{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:650px){.po-metrics{grid-template-columns:1fr}.po-inv{grid-template-columns:34px 1fr auto;row-gap:6px}.po-inv-when{grid-column:2/4;text-align:left;min-width:0}}
+/* Transaction status: spinner while a gasless op is in flight, check when it settles */
+@keyframes txSpin{to{transform:rotate(360deg)}}
+@keyframes txIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.tx-status{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:var(--radius-ui);animation:txIn .22s ease}
+.tx-icon{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;background:#fff;border:1px solid var(--line);color:#111}
+.tx-spinner{width:12px;height:12px;border-radius:50%;border:2px solid rgba(127,127,127,.3);border-top-color:currentColor;animation:txSpin .7s linear infinite}
+.tx-status.done{background:#f2fbf5;border-color:#cfe9d8}
+.tx-status.done .tx-icon{background:#2a8a45;border-color:#2a8a45;color:#fff}
+.tx-status.error{background:#fdf5f3;border-color:#f0d7d1}
+.tx-status.error .tx-icon{background:var(--lime);border-color:var(--lime);color:#fff}
+.tx-copy{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tx-copy strong{font-size:12px;font-weight:600;color:#111}
+.tx-copy small{font-size:11px;color:#767b78;overflow-wrap:anywhere}
+.tx-copy small a{color:#2a8a45;font-weight:600;text-decoration:underline}
 .su{display:flex;flex-direction:column;gap:16px}
 .su-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
 .su-head h1{font-size:26px;font-weight:500;letter-spacing:-.8px;margin:0;color:#111}

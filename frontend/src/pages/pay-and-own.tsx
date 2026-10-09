@@ -3,10 +3,11 @@ import { Percent, TrendingUp, Wallet } from 'lucide-react'
 import type { Address } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { SmartWalletGate } from '@/components/guard'
+import { TxStatus, type TxStatusValue } from '@/components/tx-status'
 import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { sendGasless } from '@/lib/gasless'
-import { EARN_VAULT_ADDRESS, TOKENS } from '@/lib/chain'
+import { EARN_VAULT_ADDRESS, TOKENS, explorerTx } from '@/lib/chain'
 import {
   apyPercent,
   buildDepositCalls,
@@ -33,10 +34,12 @@ function EarnContent() {
   const [position, setPosition] = useState<EarnPosition | null>(null)
   const [reading, setReading] = useState(false)
   const [amount, setAmount] = useState('')
-  const [busy, setBusy] = useState('')
-  const [notice, setNotice] = useState('')
+  const [tx, setTx] = useState<TxStatusValue>({ state: 'idle' })
+  const [pending, setPending] = useState<'deposit' | 'withdraw' | null>(null)
   const [error, setError] = useState('')
   const [tick, setTick] = useState(0)
+
+  const busy = tx.state === 'pending'
 
   const usdc = TOKENS.find(t => t.key === 'USDC')!
   const decimals = usdc.decimals
@@ -93,69 +96,98 @@ function EarnContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [position, tick, decimals])
 
-  const submit = async (calls: Parameters<typeof sendGasless>[0]['calls'], statusMsg: string) => {
-    if (!account) throw new Error('Wallet not ready')
-    if (!ownerAddress) throw new Error('Wallet not ready')
+  const submit = async (calls: Parameters<typeof sendGasless>[0]['calls'], label: string) => {
+    if (!account || !ownerAddress) throw new Error('Wallet not ready')
     const walletClient = await getWalletClient()
     if (!walletClient) throw new Error('wallet_unavailable')
-    setBusy(statusMsg)
+    setTx({ state: 'pending', message: 'Transaction in progress…', detail: 'Confirm in your wallet' })
     const result = await sendGasless({
       walletClient,
       ownerAddress: ownerAddress as `0x${string}`,
       calls,
       onStatus: s => {
-        if (s === 'signing') setBusy('Confirm in your wallet…')
-        else if (s === 'submitted') setBusy('Submitted — waiting for confirmation on Monad…')
-        else setBusy('Confirming on Monad…')
+        if (s === 'signing') setTx({ state: 'pending', message: 'Transaction in progress…', detail: 'Confirm in your wallet' })
+        else if (s === 'submitted') setTx({ state: 'pending', message: 'Transaction in progress…', detail: `Waiting for confirmation on Monad (${label.toLowerCase()})` })
+        else if (s === 'confirmed') setTx({ state: 'pending', message: 'Transaction in progress…', detail: 'Confirmed — finalizing' })
+        else setTx({ state: 'pending', message: 'Transaction in progress…', detail: 'Preparing the transaction' })
       },
-      onUserOpHash: h => setBusy(`Submitted (${h.slice(0, 12)}…) — waiting for confirmation on Monad…`),
+      onUserOpHash: h => setTx({ state: 'pending', message: 'Transaction in progress…', detail: `Submitted ${h.slice(0, 10)}…${h.slice(-6)} — waiting for confirmation on Monad` }),
     })
     return result.txHash
   }
 
-  const handleError = (e: unknown, fallback: string) => {
+  /** Receipt timeouts are common on Monad testnet — check the chain before calling it a failure. */
+  const handleTxError = async (e: unknown, fallback: string, verifyLanded?: () => Promise<boolean>) => {
     const err = e as Error & { shortMessage?: string }
     const msg = err.shortMessage || err.message || fallback
     if (/Timed out while waiting|Still waiting on confirmation/i.test(msg)) {
-      setNotice('Submitted — still confirming on Monad. Refresh in a moment.')
-      void load()
+      setTx({ state: 'pending', message: 'Still confirming on Monad…', detail: 'The network is taking longer than usual — checking again shortly.' })
+      const settle = async () => {
+        if (verifyLanded && await verifyLanded().catch(() => false)) {
+          setTx({ state: 'done', message: 'Transaction completed', detail: 'Confirmed on Monad.' })
+          return true
+        }
+        return false
+      }
+      if (await settle()) { void load(); return }
+      window.setTimeout(() => {
+        void settle().then(ok => { if (!ok) setTx({ state: 'idle' }); void load() })
+      }, 12_000)
     } else {
-      setError(msg)
+      setTx({ state: 'error', message: msg })
     }
   }
 
   const deposit = async () => {
-    setError(''); setNotice('')
+    setError('')
     const amt = parseFloat(amount) || 0
     if (!(amt > 0)) return setError('Enter an amount to deposit')
     if (amt > usdcBalance) return setError('Amount exceeds your USDC balance')
+    const before = position?.shares ?? 0n
+    setPending('deposit')
     try {
       const raw = BigInt(Math.round(amt * 10 ** decimals))
-      await submit(
+      const hash = await submit(
         buildDepositCalls({ asset: usdc.address!, amountRaw: raw, receiver: account as Address }),
-        'Depositing…',
+        'Deposit',
       )
       setAmount('')
-      setNotice('Deposited')
+      setTx({
+        state: 'done',
+        message: 'Transaction completed',
+        detail: <>Deposited {fmt6(amt)} USDC{hash && <> · <a href={explorerTx(hash)} target="_blank" rel="noreferrer">View on explorer</a></>}</>,
+      })
       void load()
     } catch (e) {
-      handleError(e, 'Deposit failed')
+      await handleTxError(e, 'Deposit failed', async () => {
+        const p = await readEarnPosition(account as Address)
+        return p.shares > before
+      })
     } finally {
-      setBusy('')
+      setPending(null)
     }
   }
 
   const withdrawAll = async () => {
-    setError(''); setNotice('')
+    setError('')
     if (!position || position.shares === 0n) return setError('Nothing deposited yet')
+    const shares = position.shares
+    setPending('withdraw')
     try {
-      await submit(buildWithdrawCalls({ shares: position.shares, receiver: account as Address }), 'Withdrawing…')
-      setNotice('Withdrawn')
+      const hash = await submit(buildWithdrawCalls({ shares, receiver: account as Address }), 'Withdrawal')
+      setTx({
+        state: 'done',
+        message: 'Transaction completed',
+        detail: <>Withdrew {fmt6(Number(shares) / 10 ** decimals)} USDC{hash && <> · <a href={explorerTx(hash)} target="_blank" rel="noreferrer">View on explorer</a></>}</>,
+      })
       void load()
     } catch (e) {
-      handleError(e, 'Withdrawal failed')
+      await handleTxError(e, 'Withdrawal failed', async () => {
+        const p = await readEarnPosition(account as Address)
+        return p.shares === 0n
+      })
     } finally {
-      setBusy('')
+      setPending(null)
     }
   }
 
@@ -202,13 +234,16 @@ function EarnContent() {
             />
           </div>
         </div>
-        {busy && <p style={{ fontSize: 12, color: '#6b7280', margin: '4px 0 0' }}>{busy}</p>}
-        {notice && !error && <p style={{ fontSize: 12, color: '#16a34a', margin: '4px 0 0' }}>{notice}</p>}
-        {error && <p style={{ fontSize: 12, color: '#ef4444', margin: '4px 0 0' }}>{error}</p>}
+        {error && <p style={{ fontSize: 12, color: '#ef4444', margin: '10px 0 0' }}>{error}</p>}
+        <TxStatus status={tx} />
         <div className="sn-actions" style={{ marginTop: 12 }}>
-          <button className="ov-btn primary" onClick={deposit} disabled={!!busy}>{busy ? 'Working…' : 'Deposit'}</button>
-          <button className="ov-btn" onClick={withdrawAll} disabled={!!busy || value.shares === 0}>
-            {position && position.shares > 0n ? 'Withdraw all' : 'Nothing to withdraw'}
+          <button className="ov-btn primary" onClick={deposit} disabled={busy}>
+            {pending === 'deposit' ? <><span className="tx-spinner" /> Working…</> : 'Deposit'}
+          </button>
+          <button className="ov-btn" onClick={withdrawAll} disabled={busy || value.shares === 0}>
+            {pending === 'withdraw'
+              ? <><span className="tx-spinner" /> Working…</>
+              : position && position.shares > 0n ? 'Withdraw all' : 'Nothing to withdraw'}
           </button>
         </div>
       </div>
