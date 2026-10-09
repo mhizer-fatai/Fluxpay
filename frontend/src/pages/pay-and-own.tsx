@@ -1,144 +1,241 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { ArrowRight, CalendarDays, Percent, TrendingUp, Wallet } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Percent, TrendingUp, Wallet } from 'lucide-react'
+import type { Address } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { SmartWalletGate } from '@/components/guard'
 import { useWallet } from '@/hooks/useWallet'
-import { listStreams } from '@/lib/streams'
-import { money, shortAddr, timeAgo } from '@/lib/format'
-
-const PREFS_KEY = 'fluxpay_prefs'
+import { useBalances } from '@/hooks/useBalances'
+import { sendGasless } from '@/lib/gasless'
+import { EARN_VAULT_ADDRESS, TOKENS } from '@/lib/chain'
+import {
+  apyPercent,
+  buildDepositCalls,
+  buildWithdrawCalls,
+  projectedAssets,
+  readEarnPosition,
+  type EarnPosition,
+} from '@/lib/earn'
+import { money, shortAddr } from '@/lib/format'
 
 export default function PayAndOwnPage() {
-  return <SmartWalletGate><PayAndOwnContent /></SmartWalletGate>
+  return <SmartWalletGate><EarnContent /></SmartWalletGate>
 }
 
-function PayAndOwnContent() {
-  // Streams live in the smart account — EOA is never queried.
-  const { smartAddress } = useWallet()
-  const address = smartAddress as string
-  const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
-  const [loading, setLoading] = useState(false)
-  const [editing, setEditing] = useState(false)
-  const [rate, setRate] = useState(2)
-  const [minInvest, setMinInvest] = useState(1)
+/** Shows enough decimals (up to 6) that per-second accrual is visible. */
+const fmt6 = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })
 
-  useEffect(() => {
+function EarnContent() {
+  // Reads use the smart account; the EOA is the signer for userOps.
+  const { address: ownerAddress, smartAddress, getWalletClient } = useWallet()
+  const account = smartAddress as string
+  const { rows } = useBalances(smartAddress)
+
+  const [position, setPosition] = useState<EarnPosition | null>(null)
+  const [reading, setReading] = useState(false)
+  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState('')
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
+  const [tick, setTick] = useState(0)
+
+  const usdc = TOKENS.find(t => t.key === 'USDC')!
+  const decimals = usdc.decimals
+  const usdcBalance = rows.find(r => r.key === 'USDC')?.amount ?? 0
+
+  const load = useCallback(async () => {
+    if (!account) return
+    setReading(true)
     try {
-      const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')
-      if (typeof prefs.rate === 'number') setRate(prefs.rate)
-    } catch { /* defaults */ }
+      setPosition(await readEarnPosition(account as Address))
+    } catch {
+      setPosition(null)
+    } finally {
+      setReading(false)
+    }
+  }, [account])
+
+  useEffect(() => { void load() }, [load])
+
+  // One-second heartbeat so the position value counts up live.
+  useEffect(() => {
+    const t = setInterval(() => setTick(v => v + 1), 1000)
+    return () => clearInterval(t)
   }, [])
 
-  useEffect(() => {
-    if (!address) return
-    setLoading(true)
-    listStreams(address)
-      .then(setStreams)
-      .catch(() => setStreams([]))
-      .finally(() => setLoading(false))
-  }, [address])
+  // Timestamp of the last on-chain read, used as the projection baseline.
+  const readAtRef = useRef(Date.now())
+  useEffect(() => { readAtRef.current = Date.now() }, [position])
 
-  const owned = streams.filter(s => s.role === 'owner' && !s.cancelled)
-  const monthlySpend = owned.reduce((s, x) => s + x.monthly, 0)
-  const investedAllTime = owned.reduce((s, x) => s + x.deposited, 0)
-  const pausedCount = streams.filter(s => s.paused && !s.cancelled).length
+  const value = useMemo(() => {
+    if (!position) return { live: 0, par: 0, earnings: 0, shares: 0, sharePrice: 1, tvl: 0, apy: 0, perDay: 0 }
+    const elapsed = (Date.now() - readAtRef.current) / 1000
+    const live = projectedAssets(position, elapsed) / 10 ** decimals
+    // Shares mint at 1:1 with the asset on the first deposit, so the share count is a
+    // good cost-basis proxy for this account's deposits.
+    const par = Number(position.shares) / 10 ** decimals
+    const tvl = Number(position.totalAssets) / 10 ** decimals
+    const sharePrice = position.totalSupply > 0n
+      ? Number(position.totalAssets) / Number(position.totalSupply)
+      : 1
+    // Yield on this account's shares, per day, in asset units.
+    const perDay = (Number(position.shares) * Number(position.ratePerSecondX18) * 86_400) / 1e18 / 10 ** decimals
+    return {
+      live,
+      par,
+      earnings: Math.max(0, live - par),
+      shares: par,
+      sharePrice,
+      tvl,
+      apy: apyPercent(position.ratePerSecondX18),
+      perDay,
+    }
+    // tick is intentional: recompute every second so the number moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [position, tick, decimals])
 
-  const maxDeposit = Math.max(1, ...streams.map(s => s.deposited))
+  const submit = async (calls: Parameters<typeof sendGasless>[0]['calls'], statusMsg: string) => {
+    if (!account) throw new Error('Wallet not ready')
+    if (!ownerAddress) throw new Error('Wallet not ready')
+    const walletClient = await getWalletClient()
+    if (!walletClient) throw new Error('wallet_unavailable')
+    setBusy(statusMsg)
+    const result = await sendGasless({
+      walletClient,
+      ownerAddress: ownerAddress as `0x${string}`,
+      calls,
+      onStatus: s => {
+        if (s === 'signing') setBusy('Confirm in your wallet…')
+        else if (s === 'submitted') setBusy('Submitted — waiting for confirmation on Monad…')
+        else setBusy('Confirming on Monad…')
+      },
+      onUserOpHash: h => setBusy(`Submitted (${h.slice(0, 12)}…) — waiting for confirmation on Monad…`),
+    })
+    return result.txHash
+  }
 
-  const savePrefs = () => {
-    localStorage.setItem(PREFS_KEY, JSON.stringify({ ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}'), rate, minInvest }))
-    setEditing(false)
+  const handleError = (e: unknown, fallback: string) => {
+    const err = e as Error & { shortMessage?: string }
+    const msg = err.shortMessage || err.message || fallback
+    if (/Timed out while waiting|Still waiting on confirmation/i.test(msg)) {
+      setNotice('Submitted — still confirming on Monad. Refresh in a moment.')
+      void load()
+    } else {
+      setError(msg)
+    }
+  }
+
+  const deposit = async () => {
+    setError(''); setNotice('')
+    const amt = parseFloat(amount) || 0
+    if (!(amt > 0)) return setError('Enter an amount to deposit')
+    if (amt > usdcBalance) return setError('Amount exceeds your USDC balance')
+    try {
+      const raw = BigInt(Math.round(amt * 10 ** decimals))
+      await submit(
+        buildDepositCalls({ asset: usdc.address!, amountRaw: raw, receiver: account as Address }),
+        'Depositing…',
+      )
+      setAmount('')
+      setNotice('Deposited')
+      void load()
+    } catch (e) {
+      handleError(e, 'Deposit failed')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const withdrawAll = async () => {
+    setError(''); setNotice('')
+    if (!position || position.shares === 0n) return setError('Nothing deposited yet')
+    try {
+      await submit(buildWithdrawCalls({ shares: position.shares, receiver: account as Address }), 'Withdrawing…')
+      setNotice('Withdrawn')
+      void load()
+    } catch (e) {
+      handleError(e, 'Withdrawal failed')
+    } finally {
+      setBusy('')
+    }
   }
 
   return <DashboardShell>
     <section className="dashboard-content po">
       <div className="po-head">
         <div>
-          <h1>Pay &amp; Own</h1>
-          <p className="po-support">Your recurring payments run as on-chain streams — see what flows out, what you hold, and automate it.</p>
+          <h1>Earn</h1>
+          <p className="po-support">Put idle USDC to work in the FluxPay Earn vault. Your balance accrues every second and you can withdraw anytime.</p>
         </div>
         <div className="po-head-actions">
-          <button className="ov-btn primary" onClick={() => (editing ? savePrefs() : setEditing(true))}>{editing ? 'Save' : 'Configure'}</button>
           <div className="po-status">
-            <span>Automation</span>
-            <em><i /> {owned.length > 0 ? 'Active' : 'No streams'}</em>
+            <span>Vault</span>
+            <em><i /> {value.tvl > 0 ? 'Earning' : 'Ready'}</em>
           </div>
         </div>
       </div>
 
       <div className="po-metrics">
-        <div className="ov-stat"><span className="ov-stat-icon"><TrendingUp size={16} /></span><small>Monthly Outgoing</small><strong>{money(monthlySpend)}</strong><em>live stream rates</em></div>
-        <div className="ov-stat"><span className="ov-stat-icon"><Wallet size={16} /></span><small>Funded All-Time</small><strong>{money(investedAllTime)}</strong><em>deposited on-chain</em></div>
-        <div className="ov-stat"><span className="ov-stat-icon"><CalendarDays size={16} /></span><small>Active Streams</small><strong>{owned.length}</strong><em>{pausedCount > 0 ? `${pausedCount} paused` : 'none paused'}</em></div>
-        <div className="ov-stat"><span className="ov-stat-icon"><Percent size={16} /></span><small>Auto-Invest Rate</small><strong>{rate}%</strong><em>your preference</em></div>
+        <div className="ov-stat"><span className="ov-stat-icon"><Wallet size={16} /></span><small>Your balance</small><strong>{fmt6(value.live)} USDC</strong><em>accruing live</em></div>
+        <div className="ov-stat"><span className="ov-stat-icon"><TrendingUp size={16} /></span><small>Earnings</small><strong>{fmt6(value.earnings)} USDC</strong><em>on your deposit</em></div>
+        <div className="ov-stat"><span className="ov-stat-icon"><Percent size={16} /></span><small>APY</small><strong>{value.apy.toFixed(2)}%</strong><em>{value.perDay > 0 ? `+${fmt6(value.perDay)} USDC/day` : 'current rate'}</em></div>
+        <div className="ov-stat"><small>Vault TVL</small><strong>{money(value.tvl)}</strong><em>total deposited</em></div>
       </div>
 
       <div className="po-card">
         <div className="po-section-head">
           <div>
-            <strong className="po-big">{money(investedAllTime)} deposited</strong>
-            <em className="po-return">across {owned.length} active {owned.length === 1 ? 'stream' : 'streams'}</em>
-          </div>
-        </div>
-        <div className="po-bars" aria-hidden="true">
-          {streams.length === 0 && <span style={{ height: '4%' }} />}
-          {streams.slice(0, 12).map(s => (
-            <span key={s.id.toString()} title={`Stream #${s.id.toString()}: ${s.deposited.toFixed(2)} ${s.token ?? ''}`} style={{ height: `${Math.max(4, (s.deposited / maxDeposit) * 100)}%` }} />
-          ))}
-        </div>
-        <p className="po-chart-label">Deposited per stream</p>
-      </div>
-
-      <div className="po-card">
-        <div className="po-section-head">
-          <h2>Recent stream activity</h2>
-          <Link className="ov-link" to="/activity">View All Activity <ArrowRight size={14} /></Link>
-        </div>
-        <div className="po-list">
-          {loading && <small>Loading streams…</small>}
-          {!loading && streams.length === 0 && <small>No streams yet — create one from the Subscriptions page.</small>}
-          {streams.slice(0, 5).map(s => (
-            <div className="po-inv" key={s.id.toString()}>
-              <span className="po-inv-logo">{(s.token ?? 'S')[0]}</span>
-              <div className="po-inv-name">
-                <strong>Stream #{s.id.toString()}</strong>
-                <small>{s.role === 'owner' ? `You pay ${shortAddr(s.recipient)}` : `${shortAddr(s.owner)} pays you`} · {s.monthly.toFixed(2)} {s.token ?? ''}/mo</small>
-              </div>
-              <span className="po-inv-amount">{s.deposited.toFixed(2)} {s.token ?? ''}</span>
-              <span className="po-inv-when">{timeAgo(s.createdAt)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="po-card po-settings-card">
-        <div className="po-section-head">
-          <h2>Automation settings</h2>
-          <div className="po-settings-actions">
-            {editing && <button className="ov-btn" onClick={() => setEditing(false)}>Cancel</button>}
+            <h2>Deposit</h2>
+            <p>Available: {usdcBalance.toLocaleString('en-US', { maximumFractionDigits: 6 })} USDC</p>
           </div>
         </div>
         <div className="po-settings">
           <div className="po-setting">
-            <div><strong>Default investment rate</strong><small>Share of eligible payments reserved for Pay &amp; Own (stored on this device).</small></div>
-            {editing ? (
-              <input type="number" min={0} max={10} value={rate} onChange={e => setRate(Number(e.target.value))} style={{ width: 72, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 10px', color: 'inherit' }} />
-            ) : (
-              <span className="po-value">{rate}%</span>
-            )}
+            <div><strong>Amount</strong><small>USDC to deposit into the vault</small></div>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              placeholder="0.00"
+              style={{ width: 120, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 10px', color: 'inherit' }}
+            />
+          </div>
+        </div>
+        {busy && <p style={{ fontSize: 12, color: '#6b7280', margin: '4px 0 0' }}>{busy}</p>}
+        {notice && !error && <p style={{ fontSize: 12, color: '#16a34a', margin: '4px 0 0' }}>{notice}</p>}
+        {error && <p style={{ fontSize: 12, color: '#ef4444', margin: '4px 0 0' }}>{error}</p>}
+        <div className="sn-actions" style={{ marginTop: 12 }}>
+          <button className="ov-btn primary" onClick={deposit} disabled={!!busy}>{busy ? 'Working…' : 'Deposit'}</button>
+          <button className="ov-btn" onClick={withdrawAll} disabled={!!busy || value.shares === 0}>
+            {position && position.shares > 0n ? 'Withdraw all' : 'Nothing to withdraw'}
+          </button>
+        </div>
+      </div>
+
+      <div className="po-card">
+        <div className="po-section-head">
+          <div>
+            <h2>Position</h2>
+            <p>{position && position.shares > 0n ? 'Your vault shares and what they are worth' : 'No deposit yet — your position appears here'}</p>
+          </div>
+        </div>
+        <div className="po-settings">
+          <div className="po-setting">
+            <div><strong>Vault</strong><small>{EARN_VAULT_ADDRESS ? shortAddr(EARN_VAULT_ADDRESS) : 'not configured'}</small></div>
+            <span className="po-value">fpUSDC</span>
           </div>
           <div className="po-setting">
-            <div><strong>Minimum investment</strong><small>Only execute investments above this amount.</small></div>
-            {editing ? (
-              <input type="number" min={0} step="0.5" value={minInvest} onChange={e => setMinInvest(Number(e.target.value))} style={{ width: 72, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '6px 10px', color: 'inherit' }} />
-            ) : (
-              <span className="po-value">${minInvest.toFixed(2)}</span>
-            )}
+            <div><strong>Vault shares</strong><small>ERC-4626 shares held by your account</small></div>
+            <span className="po-value">{value.shares.toLocaleString('en-US', { maximumFractionDigits: 6 })}</span>
           </div>
           <div className="po-setting">
-            <div><strong>Investment funding</strong><small>The asset used to fund investments.</small></div>
-            <span className="po-value">USDC</span>
+            <div><strong>Share price</strong><small>Rises as the strategy earns</small></div>
+            <span className="po-value">{value.sharePrice.toFixed(6)} USDC</span>
+          </div>
+          <div className="po-setting">
+            <div><strong>Yield source</strong><small>Swappable strategy — simulated on testnet, Curvance/Aave/Morpho on mainnet</small></div>
+            <span className="po-value">{reading ? 'Reading…' : 'Testnet mock'}</span>
           </div>
         </div>
       </div>

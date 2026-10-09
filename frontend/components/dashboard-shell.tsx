@@ -16,7 +16,7 @@ interface NotifItem { id: string; title: string; body: string; time: string; rea
 
 const nav: NavItem[] = [
   { label: 'Overview', href: '/dashboard', icon: LayoutDashboard, group: 'Main', description: 'Your account at a glance' },
-  { label: 'Pay & Own', href: '/pay-and-own', icon: CreditCard, group: 'Main', description: 'Turn everyday payments into ownership' },
+  { label: 'Earn', href: '/pay-and-own', icon: CreditCard, group: 'Main', description: 'Put idle USDC in a vault and earn' },
   { label: 'Subscriptions', href: '/subscriptions', icon: CalendarDays, group: 'Main', description: 'Manage and track your subscriptions' },
   { label: 'Portfolio', href: '/portfolio', icon: Wallet, group: 'Main', description: 'See the assets you own' },
   { label: 'Activity', href: '/activity', icon: Activity, group: 'Main', description: 'Your transactions and history' },

@@ -193,6 +193,28 @@ export const splitManagerAbi = [
   { type: 'function', name: 'disburse', stateMutability: 'nonpayable', inputs: [{ name: 'token', type: 'address' }, { name: 'payees', type: 'address[]' }, { name: 'shares', type: 'uint256[]' }], outputs: [{ name: 'total', type: 'uint256' }] },
 ] as const
 
+/** EarnVault (ERC-4626) — deposit idle USDC, shares appreciate as the yield strategy earns. */
+export const EARN_VAULT_ADDRESS = import.meta.env.VITE_EARN_VAULT_ADDRESS as Address
+
+export const earnVaultAbi = [
+  { type: 'function', name: 'asset', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+  { type: 'function', name: 'totalAssets', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'totalSupply', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'convertToAssets', stateMutability: 'view', inputs: [{ name: 'shares', type: 'uint256' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'previewRedeem', stateMutability: 'view', inputs: [{ name: 'shares', type: 'uint256' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'deposit', stateMutability: 'nonpayable', inputs: [{ name: 'assets', type: 'uint256' }, { name: 'receiver', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'redeem', stateMutability: 'nonpayable', inputs: [{ name: 'shares', type: 'uint256' }, { name: 'receiver', type: 'address' }, { name: 'owner', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'strategy', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+] as const
+
+/** Yield strategy behind the Earn vault. Testnet: MockYieldStrategy (fixed per-second rate). */
+export const yieldStrategyAbi = [
+  { type: 'function', name: 'ratePerSecondX18', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'reserve', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'totalValue', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+] as const
+
 export const USERNAME_HASH = (username: string): `0x${string}` => keccak256(toHex(username.toLowerCase()))
 
 export const formatTokenAmount = (raw: bigint, decimals: number, maxFrac = 6): string => {
