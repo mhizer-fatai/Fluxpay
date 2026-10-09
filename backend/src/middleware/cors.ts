@@ -1,8 +1,17 @@
 import type { Request, Response, NextFunction } from "express";
+import { config } from "../config.js";
 
-/** Permissive CORS: the frontend runs on :5173 and authenticates via Bearer tokens (no cookies). */
+/**
+ * CORS: explicit origin allowlist (local dev by default, production origins via
+ * CORS_ORIGINS). Auth is Bearer-token only, but an authenticated API should not
+ * advertise a wildcard origin.
+ */
 export function corsMiddleware(req: Request, res: Response, next: NextFunction) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin;
+  if (origin && config.corsOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Access-Control-Max-Age", "86400");

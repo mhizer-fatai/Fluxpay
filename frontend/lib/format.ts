@@ -17,3 +17,17 @@ export const initials = (name: string) =>
   name.trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'U'
 
 export const shortAddr = (addr: string) => `${addr.slice(0, 6)}…${addr.slice(-4)}`
+
+/**
+ * USD value of a token amount. Returns null when the token has no known price, so
+ * callers can avoid inventing dollar figures for non-stable assets.
+ */
+export const usdOf = (
+  amount: number,
+  token: string | null | undefined,
+  prices: Record<string, number> | null,
+): number | null => {
+  const key = (token ?? 'USDC').toUpperCase()
+  const price = prices?.[key]
+  return typeof price === 'number' ? amount * price : null
+}

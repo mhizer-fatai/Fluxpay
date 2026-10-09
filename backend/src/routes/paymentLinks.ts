@@ -4,8 +4,13 @@ import { requireAuth } from "../auth/requireAuth.js";
 import { attachAuthToContext } from "../middleware/requestContext.js";
 import { validate } from "../middleware/validate.js";
 import { paymentLinkService } from "../services/paymentLinkService.js";
+import { assertAddressAccess } from "../services/accessService.js";
+import { rateLimit } from "../middleware/rateLimit.js";
 
 export const paymentLinkRouter = Router();
+
+/** Public payer route: bound the upstream RPC work per IP. */
+const paidLimiter = rateLimit({ windowMs: 60_000, max: 20, name: "link-paid" });
 
 const addressSchema = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
 
@@ -26,6 +31,7 @@ paymentLinkRouter.post(
   async (req, res, next) => {
     try {
       const body = req.body as z.infer<typeof createSchema>;
+      await assertAddressAccess(req.auth!.userId, body.creatorAddress);
       res.status(201).json(
         await paymentLinkService.create({
           creatorAddress: body.creatorAddress.toLowerCase(),
@@ -50,6 +56,7 @@ paymentLinkRouter.get(
   async (req, res, next) => {
     try {
       const { address, limit } = res.locals.query as { address: string; limit: number };
+      await assertAddressAccess(req.auth!.userId, address);
       res.json(await paymentLinkService.listMine(address.toLowerCase(), limit));
     } catch (err) {
       next(err);
@@ -78,6 +85,7 @@ const paidSchema = z.object({
  */
 paymentLinkRouter.post(
   "/:id/paid",
+  paidLimiter,
   validate({ body: paidSchema }),
   async (req, res, next) => {
     try {

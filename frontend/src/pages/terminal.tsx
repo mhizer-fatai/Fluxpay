@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Address } from 'viem'
 import { ArrowRight, ExternalLink } from 'lucide-react'
+import type { Address } from 'viem'
+import { parseUnits } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { SmartWalletGate } from '@/components/guard'
 import { useProfile } from '@/hooks/profile'
@@ -37,7 +38,7 @@ function TerminalContent() {
     { kind: 'out', text: 'FluxPay Terminal — connected to Monad testnet. Type "help" for commands.' },
   ])
   const [history, setHistory] = useState<HistoryRow[]>([])
-  const pending = useRef<null | { amount: number; token: TokenKey; to: string }>(null)
+  const pending = useRef<null | { amount: string; token: TokenKey; to: string }>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -99,7 +100,7 @@ function TerminalContent() {
         if (!/^0x[a-fA-F0-9]{40}$/.test(to)) {
           try { to = (await resolveUsernameApi(to.replace(/^@/, ''))).address } catch { push({ kind: 'err', text: `Recipient ${m[3]} is not a valid address or registered username` }); return }
         }
-        pending.current = { amount, token: tokenKey, to }
+        pending.current = { amount: m[1], token: tokenKey, to }
         push({ kind: 'out', text: `Ready: send ${amount} ${tokenKey} to ${shortAddr(to)}\nType "confirm" to execute.` })
         done('Prepared')
         return
@@ -114,7 +115,7 @@ function TerminalContent() {
         push({ kind: 'out', text: 'Executing…' })
         const result = await sendGasless({
           walletClient, ownerAddress: address as Address,
-          calls: buildSettleCalls({ token: tokenByKey(tokenKey), amountHuman: amount, to: to as Address }),
+          calls: buildSettleCalls({ token: tokenByKey(tokenKey), amountRaw: parseUnits(amount, tokenByKey(tokenKey).decimals), to: to as Address }),
         })
         push({ kind: 'out', text: `Confirmed. tx: ${result.txHash}`, txHash: result.txHash })
         done('Transfer', result.txHash)
@@ -126,7 +127,12 @@ function TerminalContent() {
       push({ kind: 'err', text: `Unknown command "${head}". Type "help".` })
     } catch (e) {
       const err = e as Error & { shortMessage?: string }
-      push({ kind: 'err', text: err.shortMessage || err.message || 'Command failed' })
+      const msg = err.shortMessage || err.message || 'Command failed'
+      // A receipt timeout may still land — keep `pending` so "confirm" can be
+      // re-checked. Any other failure means nothing was broadcast: clear it so a
+      // retry cannot re-send a possibly-landed payment.
+      if (pending.current && !/still waiting on confirmation/i.test(msg)) pending.current = null
+      push({ kind: 'err', text: msg })
     }
   }
 
@@ -139,7 +145,7 @@ function TerminalContent() {
   return <DashboardShell>
     <section className="dashboard-content at">
       <div className="at-head">
-        <h1>AI Terminal</h1>
+        <h1>Terminal</h1>
         <p className="at-sub">Real actions in plain commands — balances, prices, username resolution, and on-chain payments.</p>
       </div>
 

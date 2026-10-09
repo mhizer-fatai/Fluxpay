@@ -23,6 +23,7 @@ contract EarnVault is ERC4626, Ownable, ReentrancyGuard {
 
     error ZeroAddress();
     error StrategyAssetMismatch();
+    error StrategyUnchanged();
 
     constructor(IERC20 asset_, IYieldStrategy strategy_, string memory vaultName, string memory vaultSymbol)
         ERC4626(asset_)
@@ -39,9 +40,22 @@ contract EarnVault is ERC4626, Ownable, ReentrancyGuard {
         return strategy.totalValue();
     }
 
-    function setStrategy(IYieldStrategy next) external onlyOwner {
+    /// @notice Swap the yield source, moving all assets from the old strategy atomically.
+    /// @dev Without the migration step the vault would report the (empty) new strategy's
+    ///      value while the old one still held the funds — share pricing would break and
+    ///      the assets would be stranded.
+    function setStrategy(IYieldStrategy next) external onlyOwner nonReentrant {
         if (address(next) == address(0)) revert ZeroAddress();
+        if (address(next) == address(strategy)) revert StrategyUnchanged();
         if (next.asset() != asset()) revert StrategyAssetMismatch();
+
+        IYieldStrategy prev = strategy;
+        uint256 assets = prev.totalValue();
+        if (assets > 0) {
+            prev.withdraw(assets, address(this));
+            IERC20(asset()).forceApprove(address(next), assets);
+            next.deposit(assets);
+        }
         strategy = next;
         emit StrategyUpdated(address(next));
     }

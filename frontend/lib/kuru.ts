@@ -13,7 +13,6 @@ import { monadTestnet } from './chain'
 import { cachedRpc } from './rpc'
 import type { GaslessCall } from './gasless'
 
-export const KURU_ROUTER = '0x7EFbE105Ca7415dE98F96622173458ac1c054630'
 export const KURU_API = (import.meta.env.VITE_KURU_API as string | undefined) ?? 'https://api.testnet.kuru.io'
 
 const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000' as Address
@@ -80,37 +79,6 @@ export async function fetchKuruBalance(provider: ethers.providers.Provider, toke
   }
   const contract = new ethers.Contract(token.address, ['function balanceOf(address) view returns (uint256)'], provider)
   return Number(ethers.utils.formatUnits(await contract.balanceOf(address), token.decimals))
-}
-
-/** Bridge a Privy wallet (EIP-1193 provider) into an ethers v5 signer (kept for compat). */
-export async function getKuruSigner(ethereumProvider: unknown): Promise<ethers.Signer> {
-  const web3Provider = new ethers.providers.Web3Provider(ethereumProvider as ethers.providers.ExternalProvider)
-  return web3Provider.getSigner()
-}
-
-/**
- * Mint Kuru testnet USDC to an address. The mock exposes open minting
- * (verified live via eth_call) — 100 USDC per click for swap testing.
- * Submitted as a sponsored userOp like every other transaction.
- */
-export async function mintKuruUsdc(
-  walletClient: WalletClient,
-  ownerAddress: Address,
-  to: Address,
-  amountHuman = 100,
-): Promise<Hash> {
-  const { sendGasless } = await import('./gasless')
-  const data = encodeFunctionData({
-    abi: [parseAbiItem('function mint(address to, uint256 amount)')],
-    functionName: 'mint',
-    args: [to, BigInt(Math.round(amountHuman * 10 ** 6))],
-  })
-  const result = await sendGasless({
-    walletClient,
-    ownerAddress,
-    calls: [{ to: KURU_USDC, data }],
-  })
-  return result.txHash
 }
 
 export interface DirectQuote {
@@ -270,9 +238,13 @@ export async function executeSwap(opts: {
   ownerAddress: Address
   ethereumProvider: unknown
   quote: DirectQuote
+  /** Address the userOp actually executes from (the smart account). Simulations must
+   *  use it — simulating from the EOA validates the wrong sender. */
+  simulateFrom?: Address
   onStatus?: (status: 'approving' | 'simulating' | 'swapping') => void
 }): Promise<{ txHash: Hash; partialFill: boolean }> {
   const { ownerAddress, quote } = opts
+  const simulateFrom = opts.simulateFrom ?? ownerAddress
   const provider = new ethers.providers.Web3Provider(opts.ethereumProvider as ethers.providers.ExternalProvider)
   const { sendGasless } = await import('./gasless')
   const submit = (calls: GaslessCall[]) =>
@@ -289,8 +261,8 @@ export async function executeSwap(opts: {
   if (quote.kind === 'wrap') {
     const wmon = new ethers.Contract(quote.market, WRAP_ABI, provider)
     const callData = quote.side === 'wrap'
-      ? { to: quote.market, data: wmon.interface.encodeFunctionData('deposit'), value: ethers.BigNumber.from(quote.inputRaw.toString()), from: ownerAddress }
-      : { to: quote.market, data: wmon.interface.encodeFunctionData('withdraw', [quote.inputRaw.toString()]), value: ethers.BigNumber.from(0), from: ownerAddress }
+      ? { to: quote.market, data: wmon.interface.encodeFunctionData('deposit'), value: ethers.BigNumber.from(quote.inputRaw.toString()), from: simulateFrom }
+      : { to: quote.market, data: wmon.interface.encodeFunctionData('withdraw', [quote.inputRaw.toString()]), value: ethers.BigNumber.from(0), from: simulateFrom }
     opts.onStatus?.('simulating')
     try {
       await provider.call(callData)
@@ -315,7 +287,7 @@ export async function executeSwap(opts: {
     to: quote.market,
     data: market.interface.encodeFunctionData(fn, [quote.inputUnits.toString(), quote.minOutRaw.toString(), false, fok]),
     value: inputIsNative ? ethers.BigNumber.from(quote.inputRaw.toString()) : ethers.BigNumber.from(0),
-    from: ownerAddress,
+    from: simulateFrom,
   })
 
   // Pre-check with the library that simulates reliably (ethers eth_call).
@@ -388,5 +360,5 @@ export const formatQuoteAmount = (raw: bigint, decimals: number) =>
   Number(formatUnits(raw, decimals)).toLocaleString('en-US', { maximumFractionDigits: 6 })
 
 // Legacy SDK-based exports removed (kuru-sdk 0.2.47 targets a retired orderbook version).
-// KURU_ROUTER is unused on testnet (no Flow entrypoint deployed there); kept for reference.
+// Swap execution is direct market calls on Kuru; no Flow router is used on testnet.
 export { encodeFunctionData }

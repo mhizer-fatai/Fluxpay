@@ -24,6 +24,7 @@ contract EarnVaultTest is Test {
         usdc = new MockUSDC();
         strategy = new MockYieldStrategy(IERC20(address(usdc)), RATE_X18);
         vault = new EarnVault(IERC20(address(usdc)), strategy, "FluxPay Earn USDC", "fpUSDC");
+        strategy.setVault(address(vault));
 
         usdc.mint(address(this), 1_000_000e6);
         usdc.mint(alice, 1_000e6);
@@ -79,6 +80,7 @@ contract EarnVaultTest is Test {
         // A second vault with no yield subsidy must stay flat.
         MockYieldStrategy dry = new MockYieldStrategy(IERC20(address(usdc)), RATE_X18);
         EarnVault dryVault = new EarnVault(IERC20(address(usdc)), dry, "Dry", "dryUSDC");
+        dry.setVault(address(dryVault));
         vm.prank(alice);
         usdc.approve(address(dryVault), type(uint256).max);
         vm.prank(alice);
@@ -97,6 +99,7 @@ contract EarnVaultTest is Test {
         // Reserve is smaller than what the rate would accrue in a year.
         MockYieldStrategy small = new MockYieldStrategy(IERC20(address(usdc)), RATE_X18);
         EarnVault smallVault = new EarnVault(IERC20(address(usdc)), small, "Small", "smUSDC");
+        small.setVault(address(smallVault));
         usdc.approve(address(small), type(uint256).max);
         small.fundYield(1e6); // 1 USDC only
 
@@ -131,6 +134,7 @@ contract EarnVaultTest is Test {
     function test_ZeroRateRoundTrip() public {
         MockYieldStrategy flat = new MockYieldStrategy(IERC20(address(usdc)), 0);
         EarnVault flatVault = new EarnVault(IERC20(address(usdc)), flat, "Flat", "flUSDC");
+        flat.setVault(address(flatVault));
         vm.prank(alice);
         usdc.approve(address(flatVault), type(uint256).max);
         vm.prank(alice);
@@ -155,11 +159,58 @@ contract EarnVaultTest is Test {
     function test_StrategySwapKeepsVaultWorking() public {
         _deposit(alice, 100e6);
         MockYieldStrategy replacement = new MockYieldStrategy(IERC20(address(usdc)), RATE_X18);
+        replacement.setVault(address(vault));
         vault.setStrategy(replacement);
         assertEq(address(vault.strategy()), address(replacement));
 
         vm.prank(alice);
         vault.deposit(50e6, alice);
-        assertEq(replacement.principal(), 50e6);
+        assertEq(replacement.principal(), 150e6); // 100 migrated + 50 new
+    }
+
+    function test_StrategySwapMigratesFunds() public {
+        _deposit(alice, 100e6);
+        vm.warp(block.timestamp + YEAR);
+        uint256 valueBefore = vault.totalAssets(); // ~105 USDC
+
+        MockYieldStrategy next = new MockYieldStrategy(IERC20(address(usdc)), RATE_X18);
+        next.setVault(address(vault));
+        vault.setStrategy(next);
+
+        assertEq(next.principal(), valueBefore); // everything moved
+        assertEq(strategy.principal(), 0); // old strategy drained
+        assertEq(vault.totalAssets(), valueBefore); // share pricing preserved
+
+        uint256 shares = vault.balanceOf(alice);
+        vm.prank(alice);
+        uint256 assets = vault.redeem(shares, alice, alice);
+        assertApproxEqAbs(assets, valueBefore, 3);
+    }
+
+    function test_SetStrategyRejectsUnwiredStrategy() public {
+        _deposit(alice, 100e6);
+        // A strategy that has not been wired to this vault rejects the migration deposit,
+        // so the swap reverts atomically instead of stranding funds.
+        MockYieldStrategy unwired = new MockYieldStrategy(IERC20(address(usdc)), RATE_X18);
+        vm.expectRevert(MockYieldStrategy.NotVault.selector);
+        vault.setStrategy(unwired);
+    }
+
+    function test_StrategyRejectsForeignWithdraw() public {
+        _deposit(alice, 100e6);
+        vm.prank(alice);
+        vm.expectRevert(MockYieldStrategy.NotVault.selector);
+        strategy.withdraw(100e6, alice);
+    }
+
+    function test_StrategyRejectsForeignDeposit() public {
+        vm.prank(alice);
+        vm.expectRevert(MockYieldStrategy.NotVault.selector);
+        strategy.deposit(1e6);
+    }
+
+    function test_SetVaultOnlyOnce() public {
+        vm.expectRevert(MockYieldStrategy.VaultAlreadySet.selector);
+        strategy.setVault(makeAddr("someone"));
     }
 }

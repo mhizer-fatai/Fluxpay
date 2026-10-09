@@ -16,6 +16,7 @@ contract MockYieldStrategy is IYieldStrategy, Ownable {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable underlying;
+    address public vault; // the only address allowed to move principal
     uint256 public principal;
     uint256 public reserve;
     uint256 public ratePerSecondX18;
@@ -25,16 +26,33 @@ contract MockYieldStrategy is IYieldStrategy, Ownable {
     event Withdrawn(uint256 amount, address indexed to);
     event YieldFunded(uint256 amount);
     event RateUpdated(uint256 ratePerSecondX18);
+    event VaultUpdated(address indexed vault);
 
     error ZeroAmount();
     error ZeroAddress();
     error InsufficientPrincipal();
+    error NotVault();
+    error VaultAlreadySet();
 
     constructor(IERC20 asset_, uint256 ratePerSecondX18_) Ownable(msg.sender) {
         if (address(asset_) == address(0)) revert ZeroAddress();
         underlying = asset_;
         ratePerSecondX18 = ratePerSecondX18_;
         lastAccrual = uint64(block.timestamp);
+    }
+
+    /// @dev Only the vault may move funds; set once, right after the vault deploys.
+    modifier onlyVault() {
+        if (msg.sender != vault) revert NotVault();
+        _;
+    }
+
+    /// @notice Point this strategy at its vault. One-time — a strategy can never be repointed.
+    function setVault(address vault_) external onlyOwner {
+        if (vault_ == address(0)) revert ZeroAddress();
+        if (vault != address(0)) revert VaultAlreadySet();
+        vault = vault_;
+        emit VaultUpdated(vault_);
     }
 
     function asset() external view returns (address) {
@@ -53,7 +71,7 @@ contract MockYieldStrategy is IYieldStrategy, Ownable {
         return principal + pendingYield();
     }
 
-    function deposit(uint256 amount) external {
+    function deposit(uint256 amount) external onlyVault {
         if (amount == 0) revert ZeroAmount();
         _realize();
         underlying.safeTransferFrom(msg.sender, address(this), amount);
@@ -61,7 +79,7 @@ contract MockYieldStrategy is IYieldStrategy, Ownable {
         emit Deposited(amount);
     }
 
-    function withdraw(uint256 amount, address to) external {
+    function withdraw(uint256 amount, address to) external onlyVault {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert ZeroAddress();
         _realize();

@@ -144,16 +144,10 @@ export default function SettingsPage() {
         {providers.map(p => <Row title={p} key={p}><span className="st-status on">Linked</span></Row>)}
       </Section>
 
-      <Section icon={TrendingUp} title="Pay & Own Preferences">
-        <Row title="Default Investment Rate" desc={`${rate}% of eligible payments (stored on this device)`}>
-          <div className="st-stepper">
-            <button onClick={() => setRate(r => Math.max(0, r - 1))} aria-label="Decrease"><Minus size={14} /></button>
-            <strong>{rate}%</strong>
-            <button onClick={() => setRate(r => Math.min(10, r + 1))} aria-label="Increase"><Plus size={14} /></button>
-          </div>
+      <Section icon={TrendingUp} title="Earn">
+        <Row title="Earn vault" desc="Deposit idle USDC and withdraw anytime from the Earn tab.">
+          <Link className="st-text-btn" to="/pay-and-own">Open Earn <ChevronRight size={14} /></Link>
         </Row>
-        <Row title="Investment Funding Asset"><span className="st-value">USDC</span></Row>
-        <Row title="Automatic Investment"><Toggle on={prefs.autoInvest !== false} onChange={() => { localStorage.setItem(PREFS_KEY, JSON.stringify({ ...prefs, autoInvest: prefs.autoInvest === false })) }} /></Row>
       </Section>
 
       <Section icon={Bell} title="Notifications">

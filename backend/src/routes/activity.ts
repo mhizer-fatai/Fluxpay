@@ -4,6 +4,7 @@ import { requireAuth } from "../auth/requireAuth.js";
 import { attachAuthToContext } from "../middleware/requestContext.js";
 import { validate } from "../middleware/validate.js";
 import { activityService } from "../services/activityService.js";
+import { assertAddressAccess } from "../services/accessService.js";
 
 export const activityRouter = Router();
 
@@ -21,6 +22,7 @@ activityRouter.get(
   async (req, res, next) => {
     try {
       const { address, limit } = res.locals.query as { address: string; limit: number };
+      await assertAddressAccess(req.auth!.userId, address);
       res.json(await activityService.list(address.toLowerCase(), limit));
     } catch (err) {
       next(err);

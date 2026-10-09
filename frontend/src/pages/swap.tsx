@@ -95,6 +95,7 @@ function SwapContent() {
         walletClient,
         ethereumProvider,
         ownerAddress: address as `0x${string}`,
+        simulateFrom: (smartAddress as `0x${string}`) ?? undefined,
         quote,
         onStatus: s => {
           setPhase(s === 'approving' ? 'approving' : s === 'simulating' ? 'simulating' : 'swapping')
@@ -106,6 +107,7 @@ function SwapContent() {
       setTxHash(hash)
       setStatusMsg(partialFill ? 'Filled partially — thin book, min-out enforced.' : '')
       quoteFor.current = ''
+      setPhase('success')
     } catch (e) {
       setError(shortErr(e))
       setPhase('error')

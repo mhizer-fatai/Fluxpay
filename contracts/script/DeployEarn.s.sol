@@ -32,6 +32,8 @@ contract DeployEarn is Script {
 
         MockYieldStrategy strategy = new MockYieldStrategy(IERC20(assetAddr), rate);
         EarnVault vault = new EarnVault(IERC20(assetAddr), strategy, "FluxPay Earn USDC", "fpUSDC");
+        // The strategy only ever moves funds for its own vault — wire it once here.
+        strategy.setVault(address(vault));
 
         if (yieldSeed > 0) {
             IERC20(assetAddr).approve(address(strategy), yieldSeed);

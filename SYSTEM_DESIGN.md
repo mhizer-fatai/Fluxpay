@@ -68,7 +68,7 @@ P256 hardware-backed). The backend submits signed intents; it can delay but neve
 > **DECISION — Privy-only (locked).** A single auth + wallet stack: social logins
 > (Google, X, Apple, email) and passkey login converge on one embedded Kernel
 > smart account (EntryPoint v0.7) per user. Gas is sponsored by the Pimlico
-> paymaster; splits use native batched calls (`sendTransaction({ calls: [...] })`).
+> paymaster; batched payments use native multicall (`sendTransaction({ calls: [...] })`).
 > Mera was evaluated and dropped: passkey-only (no social logins), WebAuthn PRF
 > authenticator friction, no gas sponsorship. This forfeits the Mera bounties;
 > Privy ($5,000) stays in play. Dynamic is the fallback embedded-wallet provider.
@@ -80,7 +80,7 @@ P256 hardware-backed). The backend submits signed intents; it can delay but neve
 | Login | Privy: social + passkey → one embedded wallet per user |
 | Account | Kernel smart account (EntryPoint v0.7), counterfactual until first op |
 | Gas sponsorship | **Built in** — Pimlico paymaster sponsors userOps; users hold ~0 MON |
-| Batching (splits!) | **Native** — `sendTransaction({ calls: [...] })` |
+| Batching | **Native** — `sendTransaction({ calls: [...] })` |
 | Recovery | Privy-managed auth + smart-account owners; ≥2 login methods per user |
 | Bounty | Privy ($5,000) / Dynamic ($5,000 fallback) |
 | Monad support | Official template repo (`next-serwist-privy-smart-wallet`) |
@@ -151,7 +151,6 @@ contracts/
 ├── SessionKeyModule.sol          §3.1 (spend limits, revocation)
 ├── FluxPay.sol                   single `settleBatch` — P2P + batches (atomic multicall)
 ├── PaymentLinkEscrow.sol         §4.2  recipient-bound claim links
-├── SplitManager.sol              §4.3  collect & disburse
 └── StreamVault.sol               §4.1  per-second pull-payment vault
 ```
 
@@ -239,14 +238,6 @@ letting a front-runner steal the escrow.
 Implementation care: EIP-712 domain `{name, version, chainId, verifyingContract}` everywhere —
 a link signed on testnet is **not** replayable on mainnet.
 
-### 4.3 Splits (two modes, one contract)
-
-- **Disburse mode:** payer → `SplitManager.disburse([(to, amt)…])` — single userOp, batch
-  transfers, atomic. (Group dinner paid by one person.)
-- **Collect mode [prod]:** organizer creates bill; each payer authorizes pull up to cap
-  (ERC-2612 `permit` or session key); `finalize()` moves funds when threshold reached;
-  `expire()` refunds stragglers. Push-over-permit, no custody.
-
 ---
 
 ## 5. Gas abstraction (users never hold MON)
@@ -276,7 +267,7 @@ Consequences for us, all of them significant:
    reverts, it sets a very high limit — on Monad that gets charged in full. Our relayer always
    sets the limit.
 4. **Batch aggressively.** Because a batch's limit is only modestly higher than a single op's,
-   `SplitSettlement` batching N transfers is dramatically cheaper per-recipient than N txs.
+   batching N transfers in one userOp is dramatically cheaper per-recipient than N txs.
    Same logic for stream `withdraw` sweeps — coalesce into one call per block window.
 5. EIP-1559 is supported: `price_per_gas = min(base + priority, max)`; **min base fee =
    100 MON-gwei**; block gas limit **200M**; per-tx gas limit **30M**. The base-fee controller
@@ -294,7 +285,7 @@ Consequences for us, all of them significant:
 ```
 Allow(userOp) = perUserDailyGasCap not exceeded
              AND globalDailyGasCap not exceeded
-             AND target ∈ {StreamVault, FluxPay, LinkEscrow, SplitManager, UsernameRegistry}
+             AND target ∈ {StreamVault, FluxPay, LinkEscrow, UsernameRegistry, EarnVault}
              AND selector ∈ allowlist
              AND gasLimit ≤ gasTable[selector] × 1.2      ← hard ceiling, Monad-specific
 ```
@@ -324,7 +315,6 @@ links        (link_id, deposit_tx_hash, amount, expiry, ephemeral_pub_x, ephemer
 streams      (stream_id, owner, recipient, asset, rate_x18, status[running|paused|exhausted|
               cancelled], created_at, paused_seconds, last_checkpoint)
 checkpoints  (stream_id, kind, at_ts, amount_x18, tx_hash)                 -- audit trail
-split_bills  (bill_id, organizer, asset, status, threshold, expires_at)
 feed_events  (event_id, event_type, actor, payload jsonb, confirmed bool, created_at)
 userops      (intent_id fk, ep_version, sender, nonce, call_data_hash, paymaster, status,
               attempts, last_error, submitted_at, mined_at, replaced_by)
@@ -349,7 +339,6 @@ POST /links                       create link (returns URL with secret fragment)
 POST /links/:linkId/claim         recipient-bound claim
 POST /links/:linkId/refund        (after expiry)
 POST /streams  PATCH /streams/:id (create / pause / resume / topUp / cancel)
-POST /splits                      disburse or create collect-bill
 GET  /balances/:address           multicall USDC + MON balance, cached, event-invalidated
 ```
 

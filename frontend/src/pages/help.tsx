@@ -15,18 +15,18 @@ interface TxStatus {
 const quickHelp = [
   { title: 'Getting Started', desc: 'Learn how FluxPay works and set up your account.', cta: 'View Guide' },
   { title: 'Payments', desc: 'Get help with sending, receiving, swapping, and payment links.', cta: 'View Guide' },
-  { title: 'Pay & Own', desc: 'Learn how everyday spending becomes automatic investments.', cta: 'Learn More' },
+  { title: 'Earn', desc: 'Deposit idle USDC into the Earn vault and withdraw anytime.', cta: 'Learn More' },
   { title: 'Wallet', desc: 'Manage your wallet, assets, and transactions.', cta: 'View Guide' },
-  { title: 'Investments', desc: 'Understand your portfolio, investments, and ownership.', cta: 'Learn More' },
+  { title: 'Payment Links', desc: 'Create single-use links payable in MON or USDC.', cta: 'Learn More' },
   { title: 'Account & Security', desc: 'Manage recovery, connected wallets, and account security.', cta: 'View Guide' },
 ]
 
 const faqs = [
-  { q: 'What is FluxPay?', a: 'FluxPay connects everyday payments with automated investing, allowing eligible spending to contribute toward assets you can own.' },
-  { q: 'How does Pay & Own work?', a: 'Pay & Own automatically invests a configured percentage of eligible payments into your selected investment assets.' },
-  { q: 'Where are my investments stored?', a: 'Your investments are held as tokenized assets in your FluxPay wallet on Monad and appear in your Portfolio.' },
-  { q: 'Can I change my investment percentage?', a: 'Yes. You can adjust your investment preferences from Pay & Own or your Settings.' },
-  { q: 'Can I pause a subscription?', a: "Yes. Pausing a subscription stops future automated investment activity while preserving investments you've already made." },
+  { q: 'What is FluxPay?', a: 'FluxPay is a non-custodial payments app on Monad: send, request, stream, swap, and earn on your balance.' },
+  { q: 'How does Earn work?', a: 'Deposit USDC into the on-chain Earn vault. Your balance accrues every second and you can withdraw anytime.' },
+  { q: 'Where do my funds live?', a: 'In your own smart account and the on-chain vault. FluxPay never holds your keys or your money.' },
+  { q: 'Can I change my investment percentage?', a: 'There is no automatic investing: the Earn tab lets you deposit and withdraw from the vault directly.' },
+  { q: 'Can I pause a subscription?', a: 'Yes. Pausing a stream stops future accrual; the recipient keeps everything already accrued.' },
   { q: 'How do I send USDC?', a: 'Open Wallet → Send, select USDC, enter the recipient address and amount, then review and confirm the transaction.' },
   { q: 'What happens if I lose access to my wallet?', a: 'Your configured recovery methods can help you regain access to your FluxPay account.' },
   { q: 'How do I create a Payment Link?', a: 'Open Wallet → Payment Link, enter the payment details, review the request, and generate your link.' },
@@ -83,7 +83,7 @@ export default function HelpPage() {
           <Search size={18} />
           <input placeholder="Search for help..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <p className="hp-search-hint">Search payments, investments, subscriptions, wallets, and more</p>
+        <p className="hp-search-hint">Search payments, streams, links, vaults, and more</p>
       </div>
 
       <div>

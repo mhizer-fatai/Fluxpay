@@ -7,12 +7,12 @@
 
 ## Scope for the sprint (ruthlessly cut)
 
-**IN:** Privy auth (social + passkey, one wallet) · send by username · payment link · split · StreamVault (per-second billing) · live activity feed · demo video
-**OUT (cut from the 6-week version):** x402 endpoint · Agora AUSD integration · Chainlink CRE automation · Aurora Intents · Kimi/Qwen commands · group management beyond one-tap split
+**IN:** Privy auth (social + passkey, one wallet) · send by username · payment link · StreamVault (per-second billing) · live activity feed · demo video
+**OUT (cut from the 6-week version):** x402 endpoint · Agora AUSD integration · Chainlink CRE automation · Aurora Intents · Kimi/Qwen commands
 
 ### Account decision (locked: Privy-only)
 
-**Privy is the single auth + wallet stack** — social logins (Google, X, Apple, email) and passkey login converge on one embedded wallet per user. Smart accounts (Kernel + EntryPoint v0.7) give built-in gas sponsorship via the Pimlico paymaster and native batched calls (splits). No Mera: Mera is passkey-only (no social logins) with authenticator friction (PRF support) and no gas sponsorship — dropped in favor of one provider doing both. This forfeits the Mera bounties ($2.5k×2); Privy bounty ($5k) stays in play.
+**Privy is the single auth + wallet stack** — social logins (Google, X, Apple, email) and passkey login converge on one embedded wallet per user. Smart accounts (Kernel + EntryPoint v0.7) give built-in gas sponsorship via the Pimlico paymaster and native batched calls. No Mera: Mera is passkey-only (no social logins) with authenticator friction (PRF support) and no gas sponsorship — dropped in favor of one provider doing both. This forfeits the Mera bounties ($2.5k×2); Privy bounty ($5k) stays in play.
 
 **Do Day 1:** create the Privy app (App ID), wire login (social + passkey), deploy the first smart account, and send one Pimlico-sponsored tx. Grab testnet MON from the faucet for all devs (sponsor funds, not users).
 
@@ -47,9 +47,7 @@
 - **Frontend:** Streams screen — balance ticking every second, big pause button
 - **End-of-day demo:** open a stream, watch it tick, hit pause → **ticking freezes in <1s**
 
-### Day 5 — Splits + integration hardening
-- **Contracts:** `SplitSettlement` (one tx → N transfers)
-- **Frontend:** split flow (pick contacts, one tap settle)
+### Day 5 — Integration hardening
 - **All:** fix everything broken; run the full demo script end-to-end on fresh accounts
 - **End-of-day demo:** the complete 5-minute demo script runs clean
 
@@ -70,7 +68,6 @@
 contracts/
 ├── FluxPay.sol              — P2P settle to username-registered recipients
 ├── PaymentLinkEscrow.sol    — linkId → {deposit, expiry, claimer, status}
-├── SplitSettlement.sol      — one tx → N transfers (atomic batch)
 └── StreamVault.sol          — streamId → {ratePerSecond, balance, accrued, paused}
 ```
 
@@ -80,7 +77,6 @@ event PaymentSettled(address indexed from, address indexed to, uint256 amount);
 event LinkCreated(bytes32 indexed linkId, address indexed depositor, uint256 amount);
 event LinkClaimed(bytes32 indexed linkId, address indexed claimer);
 event LinkRefunded(bytes32 indexed linkId);
-event SplitSettled(address indexed payer, uint256 total, uint256 count);
 event StreamOpened(uint256 indexed id, address indexed to, uint96 ratePerSecond);
 event StreamAccrued(uint256 indexed id, uint256 amount, uint40 at);
 event StreamPaused(uint256 indexed id);
@@ -111,7 +107,6 @@ event StreamCancelled(uint256 indexed id, uint256 refunded, uint256 paidOut);
 | `/` | home: balance, quick actions, live activity preview |
 | `/pay` | send by username/QR/link |
 | `/activity` | real-time feed |
-| `/split` | split flow |
 | `/streams` | live-ticking streams, pause/cancel |
 | `/link/[id]` | claim page for payment links (passkey claim) |
 
@@ -133,7 +128,7 @@ event StreamCancelled(uint256 indexed id, uint256 refunded, uint256 paidOut);
 
 1. **(0:00)** Fresh phone → onboarding in 20 seconds (passkey, no seed phrase)
 2. **(0:30)** Send $5 to teammate by username — feed updates before finger lifts
-3. **(1:30)** Split a bill 3 ways — one tap, all settled
+3. **(1:30)** Create a payment link, pay it from a browser wallet — single-use, settles instantly
 4. **(2:30)** Open a pay-per-second subscription — balance ticking live
 5. **(3:30)** Hit pause — ticking freezes in <1s. *"Only possible on Monad."*
 6. **(4:30)** Close: never said the word blockchain. Money that moves like a message.

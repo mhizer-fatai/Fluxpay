@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { parseUnits } from 'viem'
 import { ArrowRight, Check, Clipboard, ExternalLink, QrCode } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { SmartWalletGate } from '@/components/guard'
@@ -136,7 +137,7 @@ function SendContent() {
   useEffect(() => { void getUsdPrices().then(setPrices) }, [])
   useEffect(() => {
     if (!address) return
-    fetchActivity(address)
+    fetchActivity(smartAddress ?? address)
       .then(items => {
         const seen = new Set<string>()
         const out: Array<{ addr: string; last: string }> = []
@@ -285,7 +286,7 @@ function SendContent() {
 
       // Idempotency: same (to, asset, amount) within 15 min reuses the pending intent
       // instead of building a second payment.
-      const rawAmount = BigInt(Math.round(amt * 10 ** asset.decimals)).toString()
+      const rawAmount = parseUnits(amount, asset.decimals).toString()
       const dupe = loadPending().find(
         p => p.to.toLowerCase() === to.toLowerCase() && p.asset === asset.key && p.amount === rawAmount,
       )
@@ -320,7 +321,7 @@ function SendContent() {
       setConfirmSecs(0)
       setReceipt(null)
       setShowReceipt(false)
-      const calls = buildSettleCalls({ token: asset, amountHuman: amt, to: to as `0x${string}` })
+      const calls = buildSettleCalls({ token: asset, amountRaw: parseUnits(amount, asset.decimals), to: to as `0x${string}` })
       const result = await sendGasless({
         walletClient,
         ownerAddress: address as `0x${string}`,
@@ -364,6 +365,11 @@ function SendContent() {
       const detail = err.body?.message || err.body?.error
       setError(detail ? `${msg} (${detail})` : msg)
       setBusy('')
+      // Nothing was broadcast: drop the pending marker so the identical retry is
+      // not blocked by the 15-minute dedupe guard.
+      if (intentId) {
+        savePending(loadPending().filter(p => p.intentId !== intentId))
+      }
       setStep('confirm')
     }
   }
@@ -428,7 +434,7 @@ function SendContent() {
               <label>Amount</label>
               <div className="sn-input-row">
                 <input placeholder={`0.00 ${asset.symbol}`} value={amount} inputMode="decimal" onChange={e => setAmount(e.target.value)} />
-                <button className="sn-inline" onClick={() => setAmount(String(balance))}>Max</button>
+                <button className="sn-inline" onClick={() => setAmount((Math.max(0, balance - balance * 1e-9)).toFixed(asset.decimals).replace(/\.?0+$/, '') || '0')}>Max</button>
               </div>
               <p className="sn-hint">Available: {balance.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}{usd > 0 && <> · ≈ {money(usd)}</>}</p>
             </div>

@@ -6,7 +6,7 @@ import { Bell, Bot, CalendarDays, ChevronDown, CircleHelp, CreditCard, LayoutDas
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
 import { fetchActivity } from '@/lib/activity'
-import { resolveUsernameApi, checkUsername } from '@/lib/api'
+import { resolveUsernameApi, checkUsername, getAuthToken } from '@/lib/api'
 import { money, initials, shortAddr, timeAgo } from '@/lib/format'
 import { EXPLORER_URL } from '@/lib/chain'
 
@@ -25,7 +25,7 @@ const nav: NavItem[] = [
   { label: 'Receive', href: '/receive', icon: Landmark, group: 'Wallet', description: 'Get paid and receive funds' },
   { label: 'Swap', href: '/swap', icon: ArrowLeftRight, group: 'Wallet', description: 'Swap tokens via Kuru Flow' },
   { label: 'Payment Link', href: '/payment-link', icon: Link2, group: 'Wallet', description: 'Create and share payment links' },
-  { label: 'AI Terminal', href: '/terminal', icon: Bot, group: 'AI', description: 'Ask the AI about your money' },
+  { label: 'Terminal', href: '/terminal', icon: Bot, group: 'Wallet', description: 'Run commands: balances, prices, payments' },
 ]
 
 const NOTIF_READ_KEY = 'fluxpay_notif_read'
@@ -85,14 +85,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!address) return
     const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/^http/, 'ws')
-    const target = `${wsUrl}/ws/activity?address=${address.toLowerCase()}`
     let socket: WebSocket | null = null
     let closed = false
     let attempts = 0
     let retryTimer: ReturnType<typeof setTimeout> | null = null
 
-    const connect = () => {
+    const connect = async () => {
       if (closed) return
+      // The gateway authenticates every connection and scopes it to the caller.
+      let token: string | null = null
+      try { token = await getAuthToken() } catch { token = null }
+      if (closed) return
+      const target = `${wsUrl}/ws/activity?address=${address.toLowerCase()}${token ? `&token=${encodeURIComponent(token)}` : ''}`
       try {
         socket = new WebSocket(target)
       } catch {
@@ -123,9 +127,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     const scheduleRetry = () => {
       if (closed || attempts >= 5) return
       attempts += 1
-      retryTimer = setTimeout(connect, Math.min(2000 * attempts, 10000))
+      retryTimer = setTimeout(() => void connect(), Math.min(2000 * attempts, 10000))
     }
-    connect()
+    void connect()
     return () => {
       closed = true
       if (retryTimer) clearTimeout(retryTimer)

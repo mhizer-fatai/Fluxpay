@@ -167,11 +167,11 @@ export async function sendGasless(opts: {
 }
 
 /** Build the approve + FluxPay.settle call batch for an ERC-20 (or native transfer call). */
-export function buildSettleCalls(opts: { token: TokenInfo; amountHuman: number; to: Address }): GaslessCall[] {
+export function buildSettleCalls(opts: { token: TokenInfo; amountRaw: bigint; to: Address }): GaslessCall[] {
   if (!opts.token.address) {
-    return [{ to: opts.to, value: BigInt(Math.round(opts.amountHuman * 1e18)) }]
+    return [{ to: opts.to, value: opts.amountRaw }]
   }
-  const rawAmount = BigInt(Math.round(opts.amountHuman * 10 ** opts.token.decimals))
+  const rawAmount = opts.amountRaw
   return [
     {
       to: opts.token.address,

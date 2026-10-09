@@ -8,19 +8,15 @@
       "events": ["Transfer", "Approval", "Settle"]
     },
     "PaymentLinkEscrow": {
-      "address": "0xd5F6Ba19aB2aFE91A4b8c162feF1d6015F266238",
+      "address": "0x47C659745F4FFc7458314c657622557A85540434",
       "events": ["Deposit", "Claim", "Refund"]
     },
     "StreamVault": {
       "address": "0x3791a605a5ED68e9e7923796Fd71ADE40E77Da13",
       "events": ["Create", "Withdraw", "Pause", "Resume", "TopUp", "Cancel"]
     },
-    "SplitManager": {
-      "address": "0x7321909c7fA49B1bad2D4c30A8068CeBffD97827",
-      "events": ["Disburse"]
-    },
     "UsernameRegistry": {
-      "address": "0x5437778A1E4E39be2DAa4dA1FADD253923B824d1",
+      "address": "0xAc34e4b98e7c765604551388B9EA082CD26556E2",
       "events": ["Register", "Transfer", "Resolve"]
     },
     "MockUSDC": {

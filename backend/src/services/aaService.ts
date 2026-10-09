@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { AppError } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
+import { assertAddressAccess } from "./accessService.js";
 
 /**
  * Read-only allowlist for the Pimlico JSON-RPC surface the app needs
@@ -22,6 +23,29 @@ const ALLOWED_METHODS = new Set([
   "pm_getPaymasterData",
 ]);
 
+/**
+ * Methods that carry a userOp: the sender is bound to the authenticated user so
+ * one account cannot spend the paymaster's gas on behalf of another user's
+ * (or an arbitrary) smart account.
+ */
+const SENDER_BOUND_METHODS = new Set([
+  "eth_sendUserOperation",
+  "eth_estimateUserOperationGas",
+  "pm_sponsorUserOperation",
+  "pm_validateSponsorshipPolicies",
+  "pm_getPaymasterStubData",
+  "pm_getPaymasterData",
+]);
+
+function userOpSender(params: unknown): string | null {
+  if (!Array.isArray(params) || params.length === 0) return null;
+  const first = params[0];
+  if (first && typeof first === "object" && typeof (first as { sender?: unknown }).sender === "string") {
+    return (first as { sender: string }).sender;
+  }
+  return null;
+}
+
 const UPSTREAM_TIMEOUT_MS = 30_000;
 
 export interface AaRpcRequest {
@@ -36,12 +60,20 @@ export interface AaRpcRequest {
  * untouched (permissionless clients parse them normally).
  */
 export const aaService = {
-  async forward(req: AaRpcRequest): Promise<unknown> {
+  async forward(req: AaRpcRequest, callerUserId: string): Promise<unknown> {
     if (!ALLOWED_METHODS.has(req.method)) {
       logger.warn("aa_method_forbidden", { method: req.method });
       throw new AppError("method not allowed through AA proxy", 403, "aa_method_forbidden", {
         method: req.method,
       });
+    }
+    if (SENDER_BOUND_METHODS.has(req.method)) {
+      const sender = userOpSender(req.params);
+      if (!sender || !/^0x[a-fA-F0-9]{40}$/.test(sender)) {
+        logger.warn("aa_sender_missing", { method: req.method });
+        throw new AppError("userOperation sender required", 400, "aa_sender_required");
+      }
+      await assertAddressAccess(callerUserId, sender);
     }
     if (!config.pimlico.apiKey) {
       throw new AppError("paymaster not configured", 503, "aa_not_configured");

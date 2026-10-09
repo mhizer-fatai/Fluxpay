@@ -5,7 +5,6 @@ import {Script, console2} from "forge-std/Script.sol";
 import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 import {UsernameRegistry} from "../src/UsernameRegistry.sol";
 import {FluxPay} from "../src/FluxPay.sol";
-import {SplitManager} from "../src/SplitManager.sol";
 import {PaymentLinkEscrow} from "../src/PaymentLinkEscrow.sol";
 import {StreamVault} from "../src/StreamVault.sol";
 
@@ -25,7 +24,6 @@ contract Deploy is Script {
         MockUSDC usdc = new MockUSDC();
         UsernameRegistry registry = new UsernameRegistry();
         FluxPay pay = new FluxPay();
-        SplitManager splits = new SplitManager();
         PaymentLinkEscrow links = new PaymentLinkEscrow();
         StreamVault streams = new StreamVault();
 
@@ -34,7 +32,6 @@ contract Deploy is Script {
         console2.log("MockUSDC:", address(usdc));
         console2.log("UsernameRegistry:", address(registry));
         console2.log("FluxPay:", address(pay));
-        console2.log("SplitManager:", address(splits));
         console2.log("PaymentLinkEscrow:", address(links));
         console2.log("StreamVault:", address(streams));
     }

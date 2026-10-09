@@ -77,7 +77,6 @@ export const explorerAddress = (addr: string) => `${EXPLORER_URL}/address/${addr
 
 export const REGISTRY_ADDRESS = import.meta.env.VITE_USERNAME_REGISTRY_ADDRESS as Address
 export const FLUXPAY_ADDRESS = import.meta.env.VITE_FLUXPAY_ADDRESS as Address
-export const SPLIT_MANAGER_ADDRESS = import.meta.env.VITE_SPLIT_MANAGER_ADDRESS as Address
 export const LINK_ESCROW_ADDRESS = import.meta.env.VITE_LINK_ESCROW_ADDRESS as Address
 export const STREAM_VAULT_ADDRESS = import.meta.env.VITE_STREAM_VAULT_ADDRESS as Address
 
@@ -194,10 +193,6 @@ export const linkEscrowAbi = [
   { type: 'function', name: 'claim', stateMutability: 'nonpayable', inputs: [{ name: 'linkId', type: 'bytes32' }, { name: 'claimer', type: 'address' }, { name: 'sig', type: 'bytes' }], outputs: [] },
   { type: 'function', name: 'refund', stateMutability: 'nonpayable', inputs: [{ name: 'linkId', type: 'bytes32' }], outputs: [] },
   { type: 'function', name: 'links', stateMutability: 'view', inputs: [{ name: '', type: 'bytes32' }], outputs: [{ name: 'depositor', type: 'address' }, { name: 'token', type: 'address' }, { name: 'amount', type: 'uint256' }, { name: 'expiry', type: 'uint40' }, { name: 'recipientAllowed', type: 'address' }, { name: 'ephemeralSigner', type: 'address' }, { name: 'claimed', type: 'bool' }, { name: 'refunded', type: 'bool' }] },
-] as const
-
-export const splitManagerAbi = [
-  { type: 'function', name: 'disburse', stateMutability: 'nonpayable', inputs: [{ name: 'token', type: 'address' }, { name: 'payees', type: 'address[]' }, { name: 'shares', type: 'uint256[]' }], outputs: [{ name: 'total', type: 'uint256' }] },
 ] as const
 
 /** EarnVault (ERC-4626) — deposit idle USDC, shares appreciate as the yield strategy earns. */

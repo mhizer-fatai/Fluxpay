@@ -8,7 +8,7 @@ function req(name: string, fallback?: string): string {
 
 export const config = {
   port: Number(req("PORT", "8080")),
-  env: req("NODE_ENV", "development"),
+  env: req("NODE_ENV", "production"),
   chain: {
     id: Number(req("CHAIN_ID", "10143")),
     rpcUrl: req("RPC_URL", "https://testnet-rpc.monad.xyz"),
@@ -20,6 +20,11 @@ export const config = {
     ),
   },
   redisUrl: req("REDIS_URL", "redis://localhost:6379"),
+  /** Browser origins allowed to call the API (comma-separated). */
+  corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
   // Pimlico bundler + paymaster. Server-side only — never expose with a VITE_ prefix.
   // Optional at startup so local dev works without it; the AA proxy returns 503 when unset.
   pimlico: {
@@ -35,7 +40,6 @@ export const config = {
     kusdc: process.env.KUSDC_ADDRESS || "0xa402b424f392eaa05dbc8779e4502a1f6a96fef1",
     registry: process.env.USERNAME_REGISTRY_ADDRESS,
     fluxPay: process.env.FLUXPAY_ADDRESS,
-    splitManager: process.env.SPLIT_MANAGER_ADDRESS,
     linkEscrow: process.env.LINK_ESCROW_ADDRESS,
     streamVault: process.env.STREAM_VAULT_ADDRESS,
   },

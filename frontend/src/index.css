@@ -292,7 +292,7 @@ button,a,input,select,textarea { font:inherit; } a { color:inherit; text-decorat
 .pf-asset{display:flex;align-items:center;gap:9px;font-weight:500}
 .pf-asset i,.pf-legend-name i{width:9px;height:9px;border-radius:50%;display:inline-block;flex-shrink:0}
 .pf-up{color:#2a8a45;font-weight:600}
-.pf-split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.pf-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .pf-allocation{display:flex;align-items:center;gap:22px}
 .pf-donut{width:140px;height:140px;flex-shrink:0}
 .pf-legend{display:flex;flex-direction:column;gap:9px;flex:1}
@@ -316,7 +316,7 @@ button,a,input,select,textarea { font:inherit; } a { color:inherit; text-decorat
 .pf-detail-grid .su-stat{border:1px solid var(--line);border-radius:var(--radius-ui);padding:12px}
 .pf-note{font-size:11px;color:#767b78;line-height:1.5;margin:0 0 16px}
 .pf-modal-actions{display:flex;justify-content:flex-end;gap:8px}
-@media(max-width:900px){.pf-metrics{grid-template-columns:repeat(2,1fr)}.pf-split{grid-template-columns:1fr}}
+@media(max-width:900px){.pf-metrics{grid-template-columns:repeat(2,1fr)}.pf-columns{grid-template-columns:1fr}}
 @media(max-width:650px){.pf-metrics{grid-template-columns:1fr}.pf-tr{grid-template-columns:1.4fr 1fr 1fr;row-gap:6px}.pf-th{display:none}.pf-allocation{flex-direction:column;align-items:flex-start}.pf-detail-grid{grid-template-columns:1fr}}
 .ac{display:flex;flex-direction:column;gap:16px}
 .ac-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}

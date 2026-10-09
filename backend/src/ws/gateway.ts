@@ -1,17 +1,44 @@
 import { WebSocketServer } from "ws";
 import { Redis } from "ioredis";
 import { config } from "../config.js";
+import { verifyPrivyToken } from "../auth/privy.js";
+import { assertAddressAccess } from "../services/accessService.js";
+import { logger } from "../lib/logger.js";
 
 /**
  * WebSocket gateway: subscribes to per-user Redis channels and fans events out to
- * connected clients. If Redis is unavailable (e.g. no Upstash set up yet), the
- * gateway still accepts connections but no events will fan out — the indexer can
- * later be wired to push directly via the WS server.
+ * connected clients. Connections are authenticated (Privy token) and scoped to an
+ * address the caller owns. Channels are refcounted so one client disconnecting can
+ * never silence another, and every live channel is re-subscribed after a Redis
+ * reconnect.
  */
 export function startWsGateway(server: import("http").Server): void {
   const wss = new WebSocketServer({ server, path: "/ws/activity" });
   let sub: Redis | null = null;
   let redisUp = false;
+  /** address -> number of live sockets watching it */
+  const subscribers = new Map<string, number>();
+
+  const subscribe = (address: string): void => {
+    const count = subscribers.get(address) ?? 0;
+    subscribers.set(address, count + 1);
+    if (count === 0 && sub && redisUp) {
+      void sub.subscribe(`user:${address}`).catch(() => { redisUp = false; });
+    }
+  };
+
+  const unsubscribe = (address: string): void => {
+    const count = subscribers.get(address) ?? 0;
+    if (count <= 1) {
+      subscribers.delete(address);
+      if (sub && redisUp) {
+        void sub.unsubscribe(`user:${address}`).catch(() => { /* already down */ });
+      }
+      return;
+    }
+    subscribers.set(address, count - 1);
+  };
+
   try {
     sub = new Redis(config.redisUrl, { lazyConnect: true, enableOfflineQueue: false, maxRetriesPerRequest: 1 });
     // ioredis emits 'error' on every failed (re)connect — without a listener
@@ -25,7 +52,12 @@ export function startWsGateway(server: import("http").Server): void {
         }
       }
     });
-    sub.on("ready", () => { redisUp = true });
+    sub.on("ready", () => {
+      redisUp = true;
+      for (const address of subscribers.keys()) {
+        void sub!.subscribe(`user:${address}`).catch(() => { redisUp = false; });
+      }
+    });
     sub.on("close", () => { redisUp = false });
     sub.on("end", () => { redisUp = false });
     void sub.connect().catch((err: Error) => console.warn("[ws] redis connect failed — pub/sub idle:", err.message));
@@ -34,20 +66,28 @@ export function startWsGateway(server: import("http").Server): void {
   wss.on("connection", (socket, req) => {
     const url = new URL(req.url ?? "", "http://localhost");
     const address = url.searchParams.get("address");
+    const token = url.searchParams.get("token");
     if (!address) {
       socket.close(4000, "missing address");
       return;
     }
-    (socket as { address?: string }).address = address.toLowerCase();
-    // Only touch Redis while connected — subscribe/unsubscribe on a dead client
-    // rejects, and an unhandled rejection would take the backend down with it.
-    if (sub && redisUp) {
-      void sub.subscribe(`user:${address.toLowerCase()}`).catch(() => { redisUp = false });
+    if (!token) {
+      socket.close(4001, "missing token");
+      return;
     }
-    socket.on("close", () => {
-      if (sub && redisUp) {
-        void sub.unsubscribe(`user:${address.toLowerCase()}`).catch(() => { /* already down */ });
+    const normalized = address.toLowerCase();
+    void (async () => {
+      try {
+        const claims = await verifyPrivyToken(token);
+        await assertAddressAccess(claims.userId, normalized);
+      } catch (err) {
+        logger.warn("ws_auth_rejected", { error: err instanceof Error ? err.message : String(err) });
+        socket.close(4003, "unauthorized");
+        return;
       }
-    });
+      (socket as { address?: string }).address = normalized;
+      subscribe(normalized);
+      socket.on("close", () => unsubscribe(normalized));
+    })();
   });
 }

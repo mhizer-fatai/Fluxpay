@@ -25,7 +25,8 @@ registryRouter.get("/resolve", validate({ query: usernameQuery }), async (req, r
 
 /**
  * GET /api/v1/registry/available?username=alice
- * Live on-chain availability check (source of truth).
+ * DB-first availability: usernames are app-owned (see profileRepo.claimUsernameDb).
+ * The on-chain UsernameRegistry mirrors the binding for external consumers.
  */
 registryRouter.get("/available", validate({ query: usernameQuery }), async (req, res, next) => {
   try {

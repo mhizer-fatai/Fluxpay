@@ -2,10 +2,30 @@ import { useCallback, useEffect, useState } from 'react'
 import { createWalletClient, custom, type Address, type EIP1193Provider, type WalletClient } from 'viem'
 import { monadTestnet } from '@/lib/chain'
 
-/** Injected EIP-1193 wallet (MetaMask et al). Read-only until `connect()` asks for accounts. */
+type Eip1193 = EIP1193Provider & { isMetaMask?: boolean; providers?: EIP1193Provider[] }
+
+// EIP-6963: wallets announce themselves, which disambiguates `window.ethereum`
+// when several are installed (Phantom + MetaMask + …).
+let announced: EIP1193Provider | null = null
+if (typeof window !== 'undefined') {
+  window.addEventListener('eip6963:announceProvider', ((e: CustomEvent<{ info?: { rdns?: string }; provider?: EIP1193Provider }>) => {
+    const provider = e.detail?.provider
+    if (!provider) return
+    if (!announced || e.detail?.info?.rdns === 'io.metamask') announced = provider
+  }) as EventListener)
+  window.dispatchEvent(new Event('eip6963:requestProvider'))
+}
+
+/** Injected wallet: an EIP-6963 announcement first, then `window.ethereum`. */
 export const getInjectedProvider = (): EIP1193Provider | null => {
   if (typeof window === 'undefined') return null
-  return (window as unknown as { ethereum?: EIP1193Provider }).ethereum ?? null
+  if (announced) return announced
+  const eth = (window as unknown as { ethereum?: Eip1193 }).ethereum ?? null
+  if (!eth) return null
+  if (Array.isArray(eth.providers)) {
+    return eth.providers.find(p => (p as Eip1193).isMetaMask) ?? eth.providers[0] ?? eth
+  }
+  return eth
 }
 
 export interface InjectedWallet {

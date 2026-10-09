@@ -36,7 +36,7 @@ paymentRouter.post(
           toAddress: body.toAddress.toLowerCase(),
           asset: body.asset,
           amount: body.amountRaw,
-        }),
+        }, req.auth!.userId),
       );
     } catch (err) {
       next(err);
@@ -51,7 +51,7 @@ paymentRouter.get(
   attachAuthToContext,
   async (req, res, next) => {
     try {
-      res.json(await paymentService.getIntent(req.params.intentId as string));
+      res.json(await paymentService.getIntent(req.params.intentId as string, req.auth!.userId));
     } catch (err) {
       next(err);
     }
@@ -79,7 +79,7 @@ paymentRouter.patch(
           useropHash: body.useropHash,
           txHash: body.txHash,
           blockNum: body.blockNum,
-        }),
+        }, req.auth!.userId),
       );
     } catch (err) {
       next(err);

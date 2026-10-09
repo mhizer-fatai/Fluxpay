@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Percent, TrendingUp, Wallet } from 'lucide-react'
-import type { Address } from 'viem'
+import { parseUnits, type Address } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { SmartWalletGate } from '@/components/guard'
 import { TxStatus, type TxStatusValue } from '@/components/tx-status'
@@ -64,6 +64,13 @@ function EarnContent() {
     const t = setInterval(() => setTick(v => v + 1), 1000)
     return () => clearInterval(t)
   }, [])
+
+  // Re-baseline from chain periodically: the projection drifts when anyone else
+  // deposits/withdraws or the reserve empties.
+  useEffect(() => {
+    const t = setInterval(() => { void load() }, 30_000)
+    return () => clearInterval(t)
+  }, [load])
 
   // Timestamp of the last on-chain read, used as the projection baseline.
   const readAtRef = useRef(Date.now())
@@ -146,7 +153,7 @@ function EarnContent() {
     const before = position?.shares ?? 0n
     setPending('deposit')
     try {
-      const raw = BigInt(Math.round(amt * 10 ** decimals))
+      const raw = parseUnits(amount || '0', decimals)
       const hash = await submit(
         buildDepositCalls({ asset: usdc.address!, amountRaw: raw, receiver: account as Address }),
         'Deposit',
@@ -171,14 +178,18 @@ function EarnContent() {
   const withdrawAll = async () => {
     setError('')
     if (!position || position.shares === 0n) return setError('Nothing deposited yet')
-    const shares = position.shares
+    // Read the live position first: shares appreciate, so the message must quote
+    // the assets the redeem will actually pay, not the share count.
+    const fresh = await readEarnPosition(account as Address).catch(() => null)
+    const shares = fresh?.shares ?? position.shares
+    const expectedAssets = fresh?.assets ?? position.assets
     setPending('withdraw')
     try {
       const hash = await submit(buildWithdrawCalls({ shares, receiver: account as Address }), 'Withdrawal')
       setTx({
         state: 'done',
         message: 'Transaction completed',
-        detail: <>Withdrew {fmt6(Number(shares) / 10 ** decimals)} USDC{hash && <> · <a href={explorerTx(hash)} target="_blank" rel="noreferrer">View on explorer</a></>}</>,
+        detail: <>Withdrew {fmt6(Number(expectedAssets) / 10 ** decimals)} USDC{hash && <> · <a href={explorerTx(hash)} target="_blank" rel="noreferrer">View on explorer</a></>}</>,
       })
       void load()
     } catch (e) {

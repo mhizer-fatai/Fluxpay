@@ -39,8 +39,8 @@ export const paymentRepo = {
     amount: string;
   }): Promise<{ row: PaymentIntentRow; deduped: boolean }> {
     const existing = await query<PaymentIntentRow>(
-      `SELECT ${COLUMNS} FROM payments WHERE idempotency_key = $1`,
-      [input.idempotencyKey],
+      `SELECT ${COLUMNS} FROM payments WHERE idempotency_key = $1 AND from_address = $2`,
+      [input.idempotencyKey, input.fromAddress.toLowerCase()],
     );
     if (existing[0]) return { row: existing[0], deduped: true };
     try {
@@ -54,8 +54,8 @@ export const paymentRepo = {
     } catch (err) {
       if ((err as { code?: string }).code === "23505") {
         const retry = await query<PaymentIntentRow>(
-          `SELECT ${COLUMNS} FROM payments WHERE idempotency_key = $1`,
-          [input.idempotencyKey],
+          `SELECT ${COLUMNS} FROM payments WHERE idempotency_key = $1 AND from_address = $2`,
+          [input.idempotencyKey, input.fromAddress.toLowerCase()],
         );
         if (retry[0]) return { row: retry[0], deduped: true };
       }

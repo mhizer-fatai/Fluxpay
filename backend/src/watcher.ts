@@ -40,10 +40,11 @@ const streamStructAbi = [
 
 const POLL_INTERVAL_MS = 4000;
 const CATCHUP_BLOCKS = 20n;
-// Providers cap eth_getLogs (public Monad RPC = 100 blocks, QuickNode = 1000).
-// Cap each tick's range so a large catch-up can never exceed the limit and fail
-// forever; it drains in bounded windows across ticks instead.
-const MAX_BLOCKS_PER_TICK = 900n;
+// Providers cap eth_getLogs (public Monad RPC = 100 blocks). Stay under the
+// smallest cap so a catch-up window can never fail wholesale; backlogs drain
+// in bounded windows across ticks instead.
+const MAX_BLOCKS_PER_TICK = 90n;
+const CURSOR_ID = "main";
 
 interface WatchedEvent {
   type: string;
@@ -63,11 +64,15 @@ async function publish(event: WatchedEvent): Promise<void> {
     ...event.payload,
   });
   for (const address of event.addresses) {
-    await query(
+    // Duplicate-proof: a retried tick must never double-record the same event.
+    const inserted = await query<{ event_id: string }>(
       `INSERT INTO feed_events (event_type, actor, payload, confirmed)
-       VALUES ($1, $2, $3, true)`,
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT DO NOTHING
+       RETURNING event_id`,
       [event.type, address, message],
     );
+    if (inserted.length === 0) continue;
     if (publisher) {
       try {
         await publisher.publish(`user:${address}`, message);
@@ -75,6 +80,32 @@ async function publish(event: WatchedEvent): Promise<void> {
         logger.warn("redis_publish_failed", { error: String(err) });
       }
     }
+  }
+}
+
+/** Watcher cursor persists across restarts so ranges are never silently skipped. */
+async function loadCursor(): Promise<bigint | null> {
+  try {
+    const rows = await query<{ last_block: string }>(
+      `SELECT last_block FROM watcher_state WHERE id = $1`,
+      [CURSOR_ID],
+    );
+    return rows[0] ? BigInt(rows[0].last_block) : null;
+  } catch (err) {
+    logger.warn("watcher_cursor_load_failed", { error: String(err) });
+    return null;
+  }
+}
+
+async function saveCursor(block: bigint): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO watcher_state (id, last_block, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (id) DO UPDATE SET last_block = $2, updated_at = now()`,
+      [CURSOR_ID, block.toString()],
+    );
+  } catch (err) {
+    logger.warn("watcher_cursor_save_failed", { error: String(err) });
   }
 }
 
@@ -157,6 +188,9 @@ export function startChainWatcher(): void {
     try {
       const latest = await publicClient.getBlockNumber();
       if (lastProcessed === null) {
+        lastProcessed = await loadCursor();
+      }
+      if (lastProcessed === null) {
         lastProcessed = latest > CATCHUP_BLOCKS ? latest - CATCHUP_BLOCKS : 0n;
       }
       if (latest <= lastProcessed) return;
@@ -168,6 +202,7 @@ interface LogLike { transactionHash: Hex; blockNumber: bigint; args: Record<stri
       const toBlock = latest - lastProcessed > MAX_BLOCKS_PER_TICK
         ? lastProcessed + MAX_BLOCKS_PER_TICK
         : latest;
+      let hadFailure = false;
 
       const getLogs = async (address: Hex, event: EvDef): Promise<LogLike[]> => {
         try {
@@ -177,6 +212,7 @@ interface LogLike { transactionHash: Hex; blockNumber: bigint; args: Record<stri
           });
           return logs as unknown as LogLike[];
         } catch (err) {
+          hadFailure = true;
           logger.warn("watcher_logs_failed", { address, from: fromBlock.toString(), to: toBlock.toString(), error: String(err) });
           return [];
         }
@@ -204,9 +240,8 @@ interface LogLike { transactionHash: Hex; blockNumber: bigint; args: Record<stri
       // Transfers to/from a FluxPay-family contract are skipped: those already
       // emit their own specific event (payment_settled, link_*, stream_*), and
       // indexing the raw Transfer too would double-list them.
-      const family = [C.fluxPay, config.contracts.splitManager, C.linkEscrow, C.streamVault]
-        .filter((a): a is string => Boolean(a))
-        .map(a => a.toLowerCase());
+      const family = [C.fluxPay, C.linkEscrow, C.streamVault]
+        .flatMap((a) => (a ? [a.toLowerCase()] : []));
       for (const [label, tokenAddr] of TOKEN_CONTRACTS) {
         if (!tokenAddr) continue;
         for (const log of await getLogs(tokenAddr as Hex, erc20TransferEvent)) {
@@ -340,7 +375,14 @@ interface LogLike { transactionHash: Hex; blockNumber: bigint; args: Record<stri
         }
       }
 
-      lastProcessed = toBlock;
+      if (!hadFailure) {
+        lastProcessed = toBlock;
+        await saveCursor(toBlock);
+      } else {
+        // Do not advance past a window that failed to read — retry it next tick
+        // instead of silently dropping those events forever.
+        logger.warn("watcher_window_deferred", { from: fromBlock.toString(), to: toBlock.toString() });
+      }
     } catch (err) {
       logger.warn("watcher_tick_failed", { error: err instanceof Error ? err.message : String(err) });
     } finally {

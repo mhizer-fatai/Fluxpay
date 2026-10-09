@@ -11,7 +11,8 @@ import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { listStreams } from '@/lib/streams'
 import { fetchActivity, peekActivity } from '@/lib/activity'
-import { money, timeAgo } from '@/lib/format'
+import { getUsdPrices } from '@/lib/chain'
+import { money, timeAgo, usdOf } from '@/lib/format'
 
 const quickActions: Array<{ label: string; icon: LucideIcon; href: string; soon?: boolean }> = [
   { label: 'Send', icon: Send, href: '/send' },
@@ -33,6 +34,9 @@ function DashboardContent() {
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof fetchActivity>>>([])
   const [exporting, setExporting] = useState(false)
+  const [prices, setPrices] = useState<Record<string, number> | null>(null)
+
+  useEffect(() => { void getUsdPrices().then(setPrices).catch(() => {}) }, [])
 
   useEffect(() => {
     if (!address) return
@@ -47,8 +51,8 @@ function DashboardContent() {
   const firstName = (profile?.fullName || profile?.username || 'there').split(/\s+/)[0]
 
   const owned = streams.filter(s => s.role === 'owner' && !s.cancelled)
-  const monthlySpend = owned.reduce((sum, s) => sum + s.monthly, 0)
-  const totalDeposited = owned.reduce((sum, s) => sum + s.deposited, 0)
+  const monthlySpend = owned.reduce((sum, s) => sum + (usdOf(s.monthly, s.token, prices) ?? 0), 0)
+  const totalDeposited = owned.reduce((sum, s) => sum + (usdOf(s.deposited, s.token, prices) ?? 0), 0)
 
   const holdings = useMemo(
     () => rows.filter(r => r.amount > 0).sort((a, b) => b.usd - a.usd).slice(0, 5),
@@ -60,7 +64,9 @@ function DashboardContent() {
     if (!address) return
     setExporting(true)
     try {
-      const items = await fetchActivity(address, 40_000)
+      // Bounded lookback: an unbounded scan floods the rate-limited RPC and gets
+      // abandoned by the 12s race anyway, leaving background calls running.
+      const items = await fetchActivity(address, 900)
       const header = 'date,type,token,amount,counterparty,tx\n'
       const body = items
         .map(i => `${new Date(i.ts * 1000).toISOString()},${i.event},${i.token ?? ''},${i.amount},${i.counterparty},${i.hash}`)

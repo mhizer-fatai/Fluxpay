@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Fluxpay backend — modular monolith (identity, payments, links, streams, indexer, relayer)",
+  "description": "Fluxpay backend - modular monolith (identity, payments, links, streams, indexer)",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",

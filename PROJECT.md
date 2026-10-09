@@ -11,7 +11,7 @@
 **Fluxpay is a consumer payments app on Monad** — "money that moves like a message."
 
 Users sign in with Face ID / a passkey (no seed phrase, no wallet, no gas, no "blockchain" in the
-UI), then send, request, split, and **stream** money with sub-second settlement on Monad
+UI), then send, request, and **stream** money with sub-second settlement on Monad
 (~400 ms blocks, ~800 ms finality). It targets **Track 2 (Consumer Products & Payments)** of the
 **Monad Metropolis hackathon** (build window 1 Sep – 13 Oct 2026, winners 3 Nov).
 
@@ -30,7 +30,7 @@ friend like sending a text, and Monad's speed finally makes that UX technically 
 
 | Feature | What it does | Differentiator |
 |---|---|---|
-| **Pay** | Send by username, request money, QR, shareable payment links, group splits (atomic batch) | The "never mentions blockchain" app from the track brief |
+| **Pay** | Send by username, request money, QR, shareable payment links | The "never mentions blockchain" app from the track brief |
 | **Streams** | Per-second billing vaults — pay-per-second subscriptions, pay-per-minute services, streaming allowances | Impossible-elsewhere proof on Monad's block time; the live demo moment (pause → tick freezes in <1 s) |
 | **Activity** | Real-time feed of every settle/stream tick | Makes sub-second finality visible to judges |
 
@@ -48,7 +48,7 @@ x402, AUSD, Chainlink CRE, AI commands (all post-core, bounty-driven stretch).
   - **Privy** is the single auth + wallet stack — social logins (Google, X, Apple,
     email) and passkey login converge on one embedded Kernel smart account
     (EntryPoint v0.7) per user, with gas sponsored by the **Pimlico** paymaster
-    and native batched calls for splits. Template:
+    and native batched calls. Template:
     (`monad-developers/next-serwist-privy-smart-wallet`).
   - **Mera dropped:** passkey-only (no social logins), PRF-authenticator friction,
     no gas sponsorship. Forfeits the Mera bounties; keeps the stack to one provider.
@@ -65,7 +65,7 @@ x402, AUSD, Chainlink CRE, AI commands (all post-core, bounty-driven stretch).
 ```
 fluxpay/
 ├── contracts/          # Foundry: UsernameRegistry, FluxPay, PaymentLinkEscrow,
-│                       #          SplitManager, StreamVault (+ mock USDC for testnet)
+│                       #          StreamVault, EarnVault (+ mock USDC for testnet)
 ├── backend/            # TS services: registry, links, streams-api, indexer,
 │                       #          relayer (userOp or 7702 sponsor), WS gateway
 ├── frontend/           # Next.js PWA: onboarding (passkey), home, pay, activity,

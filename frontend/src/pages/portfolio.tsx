@@ -6,8 +6,8 @@ import { SmartWalletGate } from '@/components/guard'
 import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { listStreams } from '@/lib/streams'
-import { TOKENS } from '@/lib/chain'
-import { money } from '@/lib/format'
+import { getUsdPrices, TOKENS } from '@/lib/chain'
+import { money, usdOf } from '@/lib/format'
 
 const TOKEN_COLORS: Record<string, string> = { MON: '#6E56CF', USDC: '#2775CA', AUSD: '#0EA5E9', WETH: '#627EEA', WMON: '#836EA8' }
 
@@ -16,12 +16,15 @@ export default function PortfolioPage() {
 }
 
 function PortfolioContent() {
-  // Smart account only — the EOA never appears in money UI.
+  // Smart account only - the EOA never appears in money UI.
   const { smartAddress } = useWallet()
   const address = smartAddress as string
   const { rows, totalUsd, loading } = useBalances(address)
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [asset, setAsset] = useState<{ key: string; amount: number; usd: number } | null>(null)
+  const [prices, setPrices] = useState<Record<string, number> | null>(null)
+
+  useEffect(() => { void getUsdPrices().then(setPrices).catch(() => {}) }, [])
 
   useEffect(() => {
     if (!address) return
@@ -29,7 +32,7 @@ function PortfolioContent() {
   }, [address])
 
   const holdings = useMemo(() => rows.filter(r => r.amount > 0).sort((a, b) => b.usd - a.usd), [rows])
-  const invested = streams.filter(s => s.role === 'owner' && !s.cancelled).reduce((s, x) => s + x.deposited, 0)
+  const invested = streams.filter(s => s.role === 'owner' && !s.cancelled).reduce((s, x) => s + (usdOf(x.deposited, x.token, prices) ?? 0), 0)
   const assetsOwned = holdings.length
 
   const allocation = holdings.map(h => ({
@@ -39,9 +42,9 @@ function PortfolioContent() {
   }))
 
   const metrics: Array<{ label: string; value: string; note: string; icon: LucideIcon; up?: boolean }> = [
-    { label: 'Total Portfolio Value', value: loading && totalUsd === 0 ? '…' : money(totalUsd), note: 'Live wallet value', icon: Wallet },
+    { label: 'Total Portfolio Value', value: loading && totalUsd === 0 ? '-¦' : money(totalUsd), note: 'Live wallet value', icon: Wallet },
     { label: 'Stream Deposits', value: money(invested), note: `Across ${streams.filter(s => s.role === 'owner').length} streams`, icon: Coins },
-    { label: 'Incoming Monthly', value: money(streams.filter(s => s.role === 'recipient' && !s.cancelled).reduce((s, x) => s + x.monthly, 0)), note: 'From active streams', icon: TrendingUp, up: true },
+    { label: 'Incoming Monthly', value: money(streams.filter(s => s.role === 'recipient' && !s.cancelled).reduce((s, x) => s + (usdOf(x.monthly, x.token, prices) ?? 0), 0)), note: 'From active streams', icon: TrendingUp, up: true },
     { label: 'Assets Held', value: String(assetsOwned), note: 'On Monad testnet', icon: Boxes },
   ]
 
@@ -67,7 +70,7 @@ function PortfolioContent() {
       <div className="pf-head">
         <div>
           <h1>Portfolio</h1>
-          <p className="pf-support">Your live token holdings and on-chain payment streams — everything read directly from Monad.</p>
+          <p className="pf-support">Your live token holdings and on-chain payment streams - everything read directly from Monad.</p>
         </div>
         <div className="pf-head-actions">
           <Link className="ov-btn primary" to="/payment-link"><Plus size={15} /> Receive</Link>
@@ -93,20 +96,20 @@ function PortfolioContent() {
         <div className="pf-section-head"><h2>Your Holdings</h2></div>
         <div className="pf-table">
           <div className="pf-tr pf-th"><span>Asset</span><span>Owned</span><span>Value</span><span>Allocation</span></div>
-          {loading && holdings.length === 0 && <p className="ac-empty">Loading balances…</p>}
-          {!loading && holdings.length === 0 && <p className="ac-empty">No holdings yet — receive funds to build your portfolio.</p>}
+          {loading && holdings.length === 0 && <p className="ac-empty">Loading balances-¦</p>}
+          {!loading && holdings.length === 0 && <p className="ac-empty">No holdings yet - receive funds to build your portfolio.</p>}
           {holdings.map(h => (
             <button className="pf-tr pf-holding" key={h.key} onClick={() => setAsset(h)}>
               <span className="pf-asset"><i style={{ background: TOKEN_COLORS[h.key] ?? '#888' }} />{h.key}</span>
               <span>{h.amount.toLocaleString('en-US', { maximumFractionDigits: 6 })}</span>
               <span>{money(h.usd)}</span>
-              <span>{totalUsd > 0 ? `${((h.usd / totalUsd) * 100).toFixed(1)}%` : '—'}</span>
+              <span>{totalUsd > 0 ? `${((h.usd / totalUsd) * 100).toFixed(1)}%` : '-'}</span>
             </button>
           ))}
         </div>
       </div>
 
-      <div className="pf-split">
+      <div className="pf-columns">
         <div className="pf-card">
           <div className="pf-section-head"><h2>Portfolio Allocation</h2></div>
           <div className="pf-allocation">
@@ -129,7 +132,7 @@ function PortfolioContent() {
             {streams.length === 0 && <small>No streams yet.</small>}
             {streams.slice(0, 5).map(s => (
               <div className="pf-source" key={s.id.toString()}>
-                <span className="pf-source-name">#{s.id.toString()} {s.role === 'owner' ? '→' : '←'} {shortAddrSafe(s.role === 'owner' ? s.recipient : s.owner)}</span>
+                <span className="pf-source-name">#{s.id.toString()} {s.role === 'owner' ? 'â†’' : 'â†'} {shortAddrSafe(s.role === 'owner' ? s.recipient : s.owner)}</span>
                 <strong>{s.deposited.toFixed(2)} {s.token ?? ''}</strong>
               </div>
             ))}
@@ -153,7 +156,7 @@ function PortfolioContent() {
             <div className="su-stat"><small>Network</small><strong>Monad Testnet</strong></div>
             <div className="su-stat"><small>Contract</small><strong>{TOKENS.find(t => t.key === asset.key)?.address ? 'ERC-20' : 'Native'}</strong></div>
           </div>
-          <p className="pf-note">{TOKENS.find(t => t.key === asset.key)?.name} · live balance from {TOKENS.find(t => t.key === asset.key)?.address ? 'the token contract' : 'the Monad chain'}.</p>
+          <p className="pf-note">{TOKENS.find(t => t.key === asset.key)?.name} Â· live balance from {TOKENS.find(t => t.key === asset.key)?.address ? 'the token contract' : 'the Monad chain'}.</p>
           <div className="pf-modal-actions">
             <Link className="ov-btn primary" to="/send">Send</Link>
             <Link className="ov-btn" to="/receive">Receive</Link>
@@ -165,5 +168,5 @@ function PortfolioContent() {
 }
 
 function shortAddrSafe(a: string) {
-  return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a
+  return a.length > 12 ? `${a.slice(0, 6)}-¦${a.slice(-4)}` : a
 }

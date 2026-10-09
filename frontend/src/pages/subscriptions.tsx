@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowRight, CalendarDays, CreditCard, Plus, X } from 'lucide-react'
-import { encodeFunctionData, type Address, type Hash } from 'viem'
+import { encodeFunctionData, parseUnits, type Address, type Hash } from 'viem'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { SmartWalletGate } from '@/components/guard'
 import { useWallet } from '@/hooks/useWallet'
 import { listStreams, type StreamRow } from '@/lib/streams'
-import { erc20Abi, STREAM_VAULT_ADDRESS, streamVaultAbi, TOKENS, type TokenKey } from '@/lib/chain'
+import { erc20Abi, getUsdPrices, STREAM_VAULT_ADDRESS, streamVaultAbi, TOKENS, type TokenKey } from '@/lib/chain'
 import { sendGasless, type GaslessCall } from '@/lib/gasless'
 import { resolveUsernameApi } from '@/lib/api'
-import { money, shortAddr } from '@/lib/format'
+import { money, shortAddr, usdOf } from '@/lib/format'
 
 const PAY_TOKENS: TokenKey[] = ['USDC', 'AUSD', 'WMON', 'WETH']
 const SECONDS_PER_MONTH = 2_592_000
@@ -32,6 +32,9 @@ function SubscriptionsContent() {
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [form, setForm] = useState({ recipient: '', amount: '', asset: 'USDC' as TokenKey, months: 1 })
+  const [prices, setPrices] = useState<Record<string, number> | null>(null)
+
+  useEffect(() => { void getUsdPrices().then(setPrices).catch(() => {}) }, [])
 
   const refresh = useCallback(async (force = false) => {
     setLoading(true)
@@ -53,9 +56,9 @@ function SubscriptionsContent() {
 
   const owned = streams.filter(s => s.role === 'owner' && !s.cancelled)
   const incoming = streams.filter(s => s.role === 'recipient' && !s.cancelled)
-  const monthlySpend = owned.reduce((s, x) => s + x.monthly, 0)
-  const monthlyIncoming = incoming.reduce((s, x) => s + x.monthly, 0)
-  const funded = owned.reduce((s, x) => s + x.deposited, 0)
+  const monthlySpend = owned.reduce((s, x) => s + (usdOf(x.monthly, x.token, prices) ?? 0), 0)
+  const monthlyIncoming = incoming.reduce((s, x) => s + (usdOf(x.monthly, x.token, prices) ?? 0), 0)
+  const funded = owned.reduce((s, x) => s + (usdOf(x.deposited, x.token, prices) ?? 0), 0)
 
   const resolveRecipient = async (input: string): Promise<string | null> => {
     const v = input.trim()
@@ -105,7 +108,7 @@ function SubscriptionsContent() {
         return setError('Recipient must be a valid address or registered @username')
       }
       const token = TOKENS.find(t => t.key === form.asset)!
-      const rawMonthly = BigInt(Math.round(amount * 10 ** token.decimals))
+      const rawMonthly = parseUnits(form.amount, token.decimals)
       // ratePerSecondX18 = rawMonthly * 1e18 / secondsPerMonth
       const rateX18 = (rawMonthly * 10n ** 18n) / BigInt(SECONDS_PER_MONTH)
       const initialDeposit = rawMonthly * BigInt(Math.max(1, Math.floor(form.months)))
