@@ -117,16 +117,22 @@ export interface PaymentLinkDto {
   amount: string
   status: 'pending' | 'paid' | 'expired'
   txHash: string | null
+  expiresAt: string | null
+  payerAllowed: string | null
   createdAt: string
 }
 
-export const createPaymentLink = (body: { creatorAddress: string; title: string; description?: string; token: string; amountRaw: string }) =>
+export const createPaymentLink = (body: { creatorAddress: string; title: string; description?: string; token: string; amountRaw: string; expiresAt?: string; payerAllowed?: string }) =>
   api<PaymentLinkDto>('/api/v1/payment-links', { method: 'POST', body: JSON.stringify(body) })
 
 export const fetchMyLinks = (address: string, limit = 50) =>
   api<PaymentLinkDto[]>(`/api/v1/payment-links/mine?address=${address.toLowerCase()}&limit=${limit}`)
 
 export const fetchLink = (id: string) => api<PaymentLinkDto>(`/api/v1/payment-links/${encodeURIComponent(id)}`)
+
+/** Demo faucet: sends a little testnet USDC to the caller's wallet. */
+export const claimFaucetUsdc = (address: string) =>
+  api<{ txHash: string; amountRaw: string }>('/api/v1/faucet/usdc', { method: 'POST', body: JSON.stringify({ address }) })
 
 export const recordLinkPaid = (id: string, body: { txHash: string; payerAddress: string }) =>
   api<PaymentLinkDto>(`/api/v1/payment-links/${encodeURIComponent(id)}/paid`, { method: 'POST', body: JSON.stringify(body) })

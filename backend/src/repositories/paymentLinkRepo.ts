@@ -11,9 +11,13 @@ export interface PaymentLinkRow {
   status: "pending" | "paid" | "expired";
   tx_hash: string | null;
   payer_address: string | null;
+  expires_at: Date | null;
+  payer_allowed: string | null;
   created_at: Date;
   paid_at: Date | null;
 }
+
+const COLUMNS = `id, creator_address, title, description, token, amount, status, tx_hash, payer_address, expires_at, payer_allowed, created_at, paid_at`;
 
 export const paymentLinkRepo = {
   newId(): string {
@@ -27,20 +31,30 @@ export const paymentLinkRepo = {
     description: string;
     token: string;
     amount: string;
+    expiresAt: Date | null;
+    payerAllowed: string | null;
   }): Promise<PaymentLinkRow> {
     const rows = await query<PaymentLinkRow>(
-      `INSERT INTO payment_links (id, creator_address, title, description, token, amount)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, creator_address, title, description, token, amount, status, tx_hash, payer_address, created_at, paid_at`,
-      [input.id, input.creatorAddress, input.title, input.description, input.token, input.amount],
+      `INSERT INTO payment_links (id, creator_address, title, description, token, amount, expires_at, payer_allowed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING ${COLUMNS}`,
+      [
+        input.id,
+        input.creatorAddress,
+        input.title,
+        input.description,
+        input.token,
+        input.amount,
+        input.expiresAt,
+        input.payerAllowed,
+      ],
     );
     return rows[0]!;
   },
 
   async findById(id: string): Promise<PaymentLinkRow | null> {
     const rows = await query<PaymentLinkRow>(
-      `SELECT id, creator_address, title, description, token, amount, status, tx_hash, payer_address, created_at, paid_at
-       FROM payment_links WHERE id = $1`,
+      `SELECT ${COLUMNS} FROM payment_links WHERE id = $1`,
       [id],
     );
     return rows[0] ?? null;
@@ -48,8 +62,7 @@ export const paymentLinkRepo = {
 
   async listByCreator(creatorAddress: string, limit: number): Promise<PaymentLinkRow[]> {
     return query<PaymentLinkRow>(
-      `SELECT id, creator_address, title, description, token, amount, status, tx_hash, payer_address, created_at, paid_at
-       FROM payment_links WHERE creator_address = $1 ORDER BY created_at DESC LIMIT $2`,
+      `SELECT ${COLUMNS} FROM payment_links WHERE creator_address = $1 ORDER BY created_at DESC LIMIT $2`,
       [creatorAddress.toLowerCase(), Math.min(Math.max(limit, 1), 200)],
     );
   },
@@ -58,8 +71,8 @@ export const paymentLinkRepo = {
   async markPaid(id: string, txHash: string, payerAddress: string): Promise<PaymentLinkRow | null> {
     const rows = await query<PaymentLinkRow>(
       `UPDATE payment_links SET status = 'paid', tx_hash = $2, payer_address = $3, paid_at = now()
-       WHERE id = $1 AND status = 'pending'
-       RETURNING id, creator_address, title, description, token, amount, status, tx_hash, payer_address, created_at, paid_at`,
+       WHERE id = $1 AND status = 'pending' AND (expires_at IS NULL OR expires_at > now())
+       RETURNING ${COLUMNS}`,
       [id, txHash, payerAddress.toLowerCase()],
     );
     return rows[0] ?? null;

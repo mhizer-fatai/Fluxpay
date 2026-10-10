@@ -25,6 +25,16 @@ export const config = {
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean),
+  /**
+   * Demo faucet: sends a little testnet USDC from the deployer wallet so a fresh
+   * user (or judge) can try the product without hunting for a faucet.
+   */
+  faucet: {
+    privateKey: process.env.FAUCET_PRIVATE_KEY || process.env.PRIVATE_KEY || "",
+    amountRaw: BigInt(process.env.FAUCET_AMOUNT_RAW || "5000000"), // 5 USDC
+    dailyCapRaw: BigInt(process.env.FAUCET_DAILY_CAP_RAW || "50000000"), // 50 USDC/day
+    cooldownMs: Number(process.env.FAUCET_COOLDOWN_MS || 6 * 3_600_000),
+  },
   // Pimlico bundler + paymaster. Server-side only — never expose with a VITE_ prefix.
   // Optional at startup so local dev works without it; the AA proxy returns 503 when unset.
   pimlico: {

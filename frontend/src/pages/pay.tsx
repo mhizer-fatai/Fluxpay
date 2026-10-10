@@ -91,6 +91,12 @@ export default function PayPage() {
 
       const payer = address ?? (await connect())
       if (!payer) return
+      // Programmable-gift condition: this link only accepts a specific payer.
+      if (fresh.payerAllowed && fresh.payerAllowed.toLowerCase() !== payer.toLowerCase()) {
+        setPhase('ready')
+        setError('This link is reserved for a different wallet.')
+        return
+      }
       await ensureChain()
 
       const token = tokenByAddressOrNative(fresh.token)
@@ -153,6 +159,7 @@ export default function PayPage() {
   const symbol = tokenMeta?.symbol ?? 'tokens'
   const paid = link?.status === 'paid'
   const wrongChain = address !== null && chainId !== null && chainId !== monadTestnet.id
+  const payerBlocked = Boolean(link?.payerAllowed && address && link.payerAllowed.toLowerCase() !== address.toLowerCase())
 
   return (
     <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#0E0E10', color: '#fff', padding: 24 }}>
@@ -184,8 +191,17 @@ export default function PayPage() {
           <>
             <p style={{ margin: '10px 0 0', fontSize: 40, fontWeight: 800 }}>{amountLabel}<em style={{ fontSize: 14, color: '#999', marginLeft: 8, fontStyle: 'normal' }}>{symbol}</em></p>
             {link.description && <p style={{ color: '#999', fontSize: 13, marginTop: 6 }}>{link.description}</p>}
+            {link.expiresAt && (
+              <p style={{ marginTop: 6, fontSize: 11, color: '#777' }}>
+                Expires {new Date(link.expiresAt).toLocaleString('en-US')}
+              </p>
+            )}
 
-            {!address ? (
+            {payerBlocked ? (
+              <p style={{ marginTop: 16, fontSize: 12, color: '#f59e0b' }}>
+                This link is reserved for a different wallet ({shortAddr(link.payerAllowed!)}). Connect that wallet to pay.
+              </p>
+            ) : !address ? (
               <button
                 onClick={connectWallet}
                 disabled={connecting}

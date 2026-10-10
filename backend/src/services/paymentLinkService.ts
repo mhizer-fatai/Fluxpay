@@ -12,8 +12,14 @@ export interface PaymentLinkDto {
   amount: string;
   status: "pending" | "paid" | "expired";
   txHash: string | null;
+  expiresAt: string | null;
+  payerAllowed: string | null;
   createdAt: string;
 }
+
+/** Expiry is derived at read time, so a link flips to "expired" without any cron. */
+const isExpired = (row: PaymentLinkRow): boolean =>
+  row.status === "pending" && row.expires_at !== null && new Date(row.expires_at).getTime() <= Date.now();
 
 const toDto = (row: PaymentLinkRow): PaymentLinkDto => ({
   id: row.id,
@@ -22,8 +28,10 @@ const toDto = (row: PaymentLinkRow): PaymentLinkDto => ({
   description: row.description,
   token: row.token,
   amount: row.amount,
-  status: row.status,
+  status: isExpired(row) ? "expired" : row.status,
   txHash: row.tx_hash,
+  expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null,
+  payerAllowed: row.payer_allowed,
   createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
 });
 
@@ -49,6 +57,8 @@ export const paymentLinkService = {
     description?: string;
     token: string;
     amountRaw: string;
+    expiresAt?: string | null;
+    payerAllowed?: string | null;
   }): Promise<PaymentLinkDto> {
     if (!/^0x[a-fA-F0-9]{40}$/.test(input.token)) {
       throw new AppError("invalid token address", 400, "invalid_token");
@@ -60,6 +70,23 @@ export const paymentLinkService = {
       throw new AppError("invalid amount", 400, "invalid_amount");
     }
     if (amount <= 0n) throw new AppError("invalid amount", 400, "invalid_amount");
+
+    let expiresAt: Date | null = null;
+    if (input.expiresAt) {
+      const parsed = new Date(input.expiresAt);
+      if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+        throw new AppError("expiry must be in the future", 400, "invalid_expiry");
+      }
+      expiresAt = parsed;
+    }
+    let payerAllowed: string | null = null;
+    if (input.payerAllowed) {
+      if (!/^0x[a-fA-F0-9]{40}$/.test(input.payerAllowed)) {
+        throw new AppError("invalid payer address", 400, "invalid_payer");
+      }
+      payerAllowed = input.payerAllowed.toLowerCase();
+    }
+
     const row = await paymentLinkRepo.create({
       id: paymentLinkRepo.newId(),
       creatorAddress: input.creatorAddress.toLowerCase(),
@@ -67,6 +94,8 @@ export const paymentLinkService = {
       description: (input.description ?? "").slice(0, 500),
       token: input.token.toLowerCase(),
       amount: amount.toString(),
+      expiresAt,
+      payerAllowed,
     });
     return toDto(row);
   },
@@ -92,6 +121,12 @@ export const paymentLinkService = {
     if (!row) throw notFound("payment link");
     if (row.status !== "pending") {
       throw new AppError(`link is already ${row.status}`, 409, "link_not_payable");
+    }
+    if (isExpired(row)) {
+      throw new AppError("this link has expired", 409, "link_expired");
+    }
+    if (row.payer_allowed && row.payer_allowed.toLowerCase() !== input.payerAddress.toLowerCase()) {
+      throw new AppError("this link is reserved for a different payer", 403, "payer_not_allowed");
     }
     if (recentlyFailed(input.txHash)) {
       throw new AppError("transaction does not pay this link", 400, "payment_not_verified");

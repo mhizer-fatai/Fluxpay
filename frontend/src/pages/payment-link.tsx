@@ -6,9 +6,9 @@ import { SmartWalletGate } from '@/components/guard'
 import { QrCode } from '@/components/qr-code'
 import { useWallet } from '@/hooks/useWallet'
 import { TOKENS, explorerTx, tokenByAddressOrNative, NATIVE_TOKEN_ADDRESS } from '@/lib/chain'
-import { createPaymentLink, fetchMyLinks, type PaymentLinkDto } from '@/lib/api'
+import { createPaymentLink, fetchMyLinks, resolveUsernameApi, type PaymentLinkDto } from '@/lib/api'
 import { linkUrl } from '@/lib/links'
-import { money, timeAgo } from '@/lib/format'
+import { money, shortAddr, timeAgo } from '@/lib/format'
 
 const USDC = TOKENS.find(t => t.key === 'USDC')!
 
@@ -46,7 +46,7 @@ function PaymentLinkContent() {
   const [copied, setCopied] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ title: '', amount: '', description: '', asset: 'USDC' as 'MON' | 'USDC' })
+  const [form, setForm] = useState({ title: '', amount: '', description: '', asset: 'USDC' as 'MON' | 'USDC', expires: 'never' as 'never' | '24h' | '7d' | '30d', payerOnly: '' })
 
   const refresh = useCallback(async () => {
     if (!address) return
@@ -87,16 +87,36 @@ function PaymentLinkContent() {
     setBusy('Creating link…')
     try {
       const asset = form.asset === 'MON' ? TOKENS.find(t => t.key === 'MON')! : USDC
+      // "Programmable gift" conditions: expiry + an optional payer restriction.
+      let payerAllowed: string | undefined
+      const payerInput = form.payerOnly.trim()
+      if (payerInput) {
+        if (/^0x[a-fA-F0-9]{40}$/.test(payerInput)) {
+          payerAllowed = payerInput
+        } else {
+          try {
+            payerAllowed = (await resolveUsernameApi(payerInput.replace(/^@/, ''))).address
+          } catch {
+            setBusy('')
+            return setError('Payer restriction must be a 0x address or a registered @username')
+          }
+        }
+      }
+      const expiresAt = form.expires === 'never'
+        ? undefined
+        : new Date(Date.now() + (form.expires === '24h' ? 24 : form.expires === '7d' ? 168 : 720) * 3_600_000).toISOString()
       const link = await createPaymentLink({
         creatorAddress: address,
         title: form.title.trim(),
         description: form.description.trim(),
         token: asset.address ?? NATIVE_TOKEN_ADDRESS,
         amountRaw: toRawAmount(clean, asset.decimals).toString(),
+        expiresAt,
+        payerAllowed,
       })
       setGenerated(link)
       setCreateOpen(false)
-      setForm({ title: '', amount: '', description: '', asset: 'USDC' })
+      setForm({ title: '', amount: '', description: '', asset: 'USDC', expires: 'never', payerOnly: '' })
       void refresh()
     } catch (e) {
       const err = e as Error & { status?: number }
@@ -187,6 +207,19 @@ function PaymentLinkContent() {
           </div>
           <div className="pl-field"><label>Amount ({form.asset})</label><input value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder={form.asset === 'MON' ? '1.00' : '100.00'} inputMode="decimal" /></div>
           <div className="pl-field"><label>Description</label><input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="What is this for?" /></div>
+          <div className="pl-field">
+            <label>Expires</label>
+            <select value={form.expires} onChange={e => setForm({ ...form, expires: e.target.value as 'never' | '24h' | '7d' | '30d' })}>
+              <option value="never">Never</option>
+              <option value="24h">In 24 hours</option>
+              <option value="7d">In 7 days</option>
+              <option value="30d">In 30 days</option>
+            </select>
+          </div>
+          <div className="pl-field">
+            <label>Only this payer (optional)</label>
+            <input value={form.payerOnly} onChange={e => setForm({ ...form, payerOnly: e.target.value })} placeholder="@alice or 0x..." />
+          </div>
           {error && <p style={{ color: '#ef4444', fontSize: 12 }}>{error}</p>}
           <div className="pl-modal-actions">
             <button className="ov-btn" onClick={() => setCreateOpen(false)} disabled={!!busy}>Cancel</button>
@@ -229,6 +262,8 @@ function PaymentLinkContent() {
             <div className="pl-field-row"><span>Created</span><strong>{new Date(detail.createdAt).toLocaleString('en-US')}</strong></div>
             <div className="pl-field-row"><span>Link ID</span><strong style={{ wordBreak: 'break-all', fontSize: 11 }}>{detail.id}</strong></div>
             <div className="pl-field-row"><span>Description</span><strong>{detail.description || '—'}</strong></div>
+            <div className="pl-field-row"><span>Expires</span><strong>{detail.expiresAt ? new Date(detail.expiresAt).toLocaleString('en-US') : 'Never'}</strong></div>
+            {detail.payerAllowed && <div className="pl-field-row"><span>Payer</span><strong>Only {shortAddr(detail.payerAllowed)}</strong></div>}
           </div>
           <div className="pl-modal-actions pl-actions-center">
             <button className="ov-btn" onClick={() => copy(linkUrl(detail.id), detail.id)}><Copy size={14} /> {copied === detail.id ? 'Copied' : 'Copy Link'}</button>

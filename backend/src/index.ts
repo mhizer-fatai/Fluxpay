@@ -13,6 +13,7 @@ import { activityRouter } from "./routes/activity.js";
 import { paymentLinkRouter } from "./routes/paymentLinks.js";
 import { paymentRouter } from "./routes/payments.js";
 import { priceRouter } from "./routes/prices.js";
+import { faucetRouter } from "./routes/faucet.js";
 import { startChainWatcher } from "./watcher.js";
 
 export function createApp(): express.Express {
@@ -35,6 +36,7 @@ export function createApp(): express.Express {
   app.use("/api/v1/payment-links", paymentLinkRouter);
   app.use("/api/v1/payments", paymentRouter);
   app.use("/api/v1/prices", priceRouter);
+  app.use("/api/v1/faucet", faucetRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

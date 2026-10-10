@@ -11,6 +11,7 @@ import { useWallet } from '@/hooks/useWallet'
 import { useBalances } from '@/hooks/useBalances'
 import { listStreams } from '@/lib/streams'
 import { fetchActivity, peekActivity } from '@/lib/activity'
+import { claimFaucetUsdc } from '@/lib/api'
 import { getUsdPrices } from '@/lib/chain'
 import { money, timeAgo, usdOf } from '@/lib/format'
 
@@ -30,13 +31,37 @@ function DashboardContent() {
   // Smart account only — the EOA never appears in money UI.
   const { smartAddress } = useWallet()
   const address = smartAddress as string
-  const { rows, totalUsd, loading } = useBalances(address)
+  const { rows, totalUsd, loading, refresh: refreshBalances } = useBalances(address)
   const [streams, setStreams] = useState<Awaited<ReturnType<typeof listStreams>>>([])
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof fetchActivity>>>([])
   const [exporting, setExporting] = useState(false)
   const [prices, setPrices] = useState<Record<string, number> | null>(null)
+  const [faucetBusy, setFaucetBusy] = useState('')
+  const [faucetNotice, setFaucetNotice] = useState('')
 
   useEffect(() => { void getUsdPrices().then(setPrices).catch(() => {}) }, [])
+
+  const usdcBalance = rows.find(r => r.key === 'USDC')?.amount ?? 0
+
+  const claimFaucet = async () => {
+    if (!address) return
+    setFaucetNotice('')
+    try {
+      setFaucetBusy('Sending test USDC...')
+      await claimFaucetUsdc(address)
+      setFaucetNotice('5 test USDC sent — you are ready to go.')
+      void refreshBalances()
+    } catch (e) {
+      const err = e as Error & { code?: string }
+      setFaucetNotice(
+        err.code === 'faucet_cooldown'
+          ? 'This wallet already claimed recently — try again later.'
+          : err.message || 'Faucet failed',
+      )
+    } finally {
+      setFaucetBusy('')
+    }
+  }
 
   useEffect(() => {
     if (!address) return
@@ -94,6 +119,17 @@ function DashboardContent() {
           <button className="ov-btn primary" onClick={exportCsv} disabled={exporting || !address}><Download size={15} /> {exporting ? 'Exporting…' : 'Export'}</button>
         </div>
       </div>
+
+      {usdcBalance < 1 && (
+        <div className="ov-card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+          <div>
+            <strong style={{ display: 'block', fontSize: 13 }}>Get 5 test USDC</strong>
+            <small style={{ color: '#767b78', fontSize: 11 }}>Fund your wallet to try sending, streams, and Pay &amp; Own. One claim per wallet.</small>
+            {faucetNotice && <small style={{ display: 'block', marginTop: 4, color: '#2a8a45', fontSize: 11 }}>{faucetNotice}</small>}
+          </div>
+          <button className="ov-btn primary" onClick={claimFaucet} disabled={!!faucetBusy}>{faucetBusy || 'Claim'}</button>
+        </div>
+      )}
 
       <div className="ov-main">
         <div className="ov-main-left">

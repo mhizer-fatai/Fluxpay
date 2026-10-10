@@ -1,5 +1,12 @@
-import { createPublicClient, http, keccak256, toHex, decodeEventLog, type Hex } from "viem";
+import { createPublicClient, defineChain, http, keccak256, toHex, decodeEventLog, type Hex } from "viem";
 import { config } from "./config.js";
+
+export const monadTestnet = defineChain({
+  id: config.chain.id,
+  name: "Monad Testnet",
+  nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
+  rpcUrls: { default: { http: [config.chain.rpcUrl] } },
+});
 
 export const publicClient = createPublicClient({
   transport: http(config.chain.rpcUrl),

@@ -20,6 +20,9 @@ const createSchema = z.object({
   description: z.string().max(500).optional(),
   token: addressSchema,
   amountRaw: z.string().regex(/^[0-9]{1,78}$/),
+  /** Optional "programmable gift" conditions. */
+  expiresAt: z.string().datetime().optional(),
+  payerAllowed: addressSchema.optional(),
 });
 
 /** POST /api/v1/payment-links — create a payment request (auth required). */
@@ -39,6 +42,8 @@ paymentLinkRouter.post(
           description: body.description,
           token: body.token.toLowerCase(),
           amountRaw: body.amountRaw,
+          expiresAt: body.expiresAt ?? null,
+          payerAllowed: body.payerAllowed ?? null,
         }),
       );
     } catch (err) {
