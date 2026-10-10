@@ -3,12 +3,13 @@ import { verifyAccessToken } from "@privy-io/node";
 
 let cachedJWKS: JWTVerifyGetKey | null = null;
 
+// The Privy app id is public (it ships in the browser bundle) and the JWKS URL is
+// derived from it — both are defaults, overridable via env.
+const DEFAULT_APP_ID = "cmuamdld600480cjtff83vl6j";
+
 function settings(): { appId: string; jwksUrl: string } {
-  const appId = process.env.PRIVY_APP_ID;
-  const jwksUrl = process.env.PRIVY_JWKS_URL;
-  if (!appId || !jwksUrl) {
-    throw new Error("auth_not_configured");
-  }
+  const appId = process.env.PRIVY_APP_ID || DEFAULT_APP_ID;
+  const jwksUrl = process.env.PRIVY_JWKS_URL || `https://auth.privy.io/api/v1/apps/${appId}/jwks.json`;
   return { appId, jwksUrl };
 }
 
