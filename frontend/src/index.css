@@ -187,6 +187,10 @@ button,a,input,select,textarea { font:inherit; } a { color:inherit; text-decorat
 /* Transaction status: spinner while a gasless op is in flight, check when it settles */
 @keyframes txSpin{to{transform:rotate(360deg)}}
 @keyframes txIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+/* Full-page loading states (route guards, sign-in hand-off) */
+.guard-loading{min-height:60vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#767b78;font-size:13px;text-align:center;padding:24px}
+.page-spinner{width:30px;height:30px;border-radius:50%;border:3px solid rgba(17,17,17,.12);border-top-color:var(--lime);animation:txSpin .7s linear infinite}
+.auth-page .guard-loading{min-height:100vh}
 .tx-status{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:var(--radius-ui);animation:txIn .22s ease}
 .tx-icon{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;background:#fff;border:1px solid var(--line);color:#111}
 .tx-spinner{width:12px;height:12px;border-radius:50%;border:2px solid rgba(127,127,127,.3);border-top-color:currentColor;animation:txSpin .7s linear infinite}

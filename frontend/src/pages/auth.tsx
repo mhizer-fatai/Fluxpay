@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePrivy } from '@privy-io/react-auth'
+import { Spinner } from '@/components/guard'
 import { useProfile } from '@/hooks/profile'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 
@@ -13,9 +14,17 @@ const reviews = [
 
 export default function AuthPage() {
   const [index, setIndex] = useState(0)
+  const [slow, setSlow] = useState(false)
   const navigate = useNavigate()
   const { ready, authenticated, login } = usePrivy()
   const { status } = useProfile()
+
+  // After a slow start, say why: the hosted demo backend sleeps on the free tier.
+  useEffect(() => {
+    if (!(ready && authenticated)) return
+    const t = setTimeout(() => setSlow(true), 8000)
+    return () => clearTimeout(t)
+  }, [ready, authenticated])
 
   useEffect(() => {
     const timer = setInterval(() => setIndex(i => (i + 1) % reviews.length), 4500)
@@ -43,10 +52,16 @@ export default function AuthPage() {
     }
   }
 
-  // Logged in: don't flash the login form while the post-login destination
-  // resolves — EXCEPT when the session is expired/dead, where the form is the
-  // only way forward even if Privy still reports `authenticated`.
-  if (ready && authenticated && status !== 'session_expired') return null
+  // Logged in: show a spinner while the post-login destination resolves — EXCEPT
+  // when the session is expired/dead, where the form is the only way forward even
+  // if Privy still reports `authenticated`.
+  if (ready && authenticated && status !== 'session_expired') {
+    return (
+      <main className="auth-page">
+        <Spinner label={slow ? 'Still signing you in — the demo server may be waking up. Hang tight…' : 'Signing you in…'} />
+      </main>
+    )
+  }
 
   return <main className="auth-page">
     <div className="auth-card">

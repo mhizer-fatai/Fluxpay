@@ -4,9 +4,19 @@ import { useProfile } from '../hooks/profile'
 import { useWallet } from '../hooks/useWallet'
 import { DashboardShell } from './dashboard-shell'
 
+/** Centered spinner used by every full-page waiting state. */
+export function Spinner({ label }: { label?: string }) {
+  return (
+    <div className="guard-loading">
+      <span className="page-spinner" aria-hidden />
+      {label && <p style={{ margin: 0 }}>{label}</p>}
+    </div>
+  )
+}
+
 /** Full-screen loading state shared by guards. */
 export function GuardLoading() {
-  return <div className="guard-loading">Loading…</div>
+  return <Spinner label="Loading…" />
 }
 
 /** Blocks dashboard routes unless authenticated AND onboarded. */
@@ -43,7 +53,7 @@ export function SmartWalletGate({ children }: { children: ReactNode }) {
     return (
       <DashboardShell>
         <section className="dashboard-content">
-          <p className="ac-empty">Setting up your smart wallet…</p>
+          <Spinner label="Setting up your smart wallet…" />
         </section>
       </DashboardShell>
     )
