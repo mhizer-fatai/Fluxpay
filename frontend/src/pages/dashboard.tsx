@@ -216,15 +216,6 @@ function DashboardContent() {
         </div>
       </div>
 
-      <div className="ov-ai">
-        <span className="ov-ai-icon"><Bot size={20} /></span>
-        <div className="ov-ai-text">
-          <h2>Need to make a move?</h2>
-          <p>Use the terminal to check balances, resolve usernames, and send payments with plain commands.</p>
-        </div>
-        <Link className="ov-btn primary" to="/terminal">Open Terminal <ArrowRight size={14} /></Link>
-      </div>
-
       <div className="ov-card">
         <div className="ov-card-head">
           <div><h2>Recent Activity</h2></div>

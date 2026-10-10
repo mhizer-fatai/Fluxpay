@@ -170,7 +170,6 @@ export default function SettingsPage() {
       <Section icon={LifeBuoy} title="Support">
         <div className="st-links">
           <Link to="/help">Help Center <ChevronRight size={14} /></Link>
-          <Link to="/terminal">AI Terminal <ChevronRight size={14} /></Link>
           <Link to="/help">Report a Problem <ChevronRight size={14} /></Link>
         </div>
       </Section>

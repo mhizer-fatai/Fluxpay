@@ -2,7 +2,7 @@
 
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useLayoutEffect, useRef, useState, Fragment, useEffect } from 'react'
-import { Bell, Bot, CalendarDays, ChevronDown, CircleHelp, CreditCard, LayoutDashboard, Search, Send, Settings, Sparkles, Wallet, WalletMinimal, ArrowLeftRight, Activity, Link2, Landmark, type LucideIcon } from 'lucide-react'
+import { Bell, CalendarDays, ChevronDown, CircleHelp, CreditCard, LayoutDashboard, Search, Send, Settings, Sparkles, Wallet, WalletMinimal, ArrowLeftRight, Activity, Link2, Landmark, type LucideIcon } from 'lucide-react'
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
 import { fetchActivity } from '@/lib/activity'
@@ -25,7 +25,6 @@ const nav: NavItem[] = [
   { label: 'Receive', href: '/receive', icon: Landmark, group: 'Wallet', description: 'Get paid and receive funds' },
   { label: 'Swap', href: '/swap', icon: ArrowLeftRight, group: 'Wallet', description: 'Swap tokens via Kuru Flow' },
   { label: 'Payment Link', href: '/payment-link', icon: Link2, group: 'Wallet', description: 'Create and share payment links' },
-  { label: 'Terminal', href: '/terminal', icon: Bot, group: 'Wallet', description: 'Run commands: balances, prices, payments' },
 ]
 
 const NOTIF_READ_KEY = 'fluxpay_notif_read'

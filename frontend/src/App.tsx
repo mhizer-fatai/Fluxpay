@@ -13,7 +13,6 @@ import PortfolioPage from './pages/portfolio'
 import SubscriptionsPage from './pages/subscriptions'
 import ActivityPage from './pages/activity'
 import SettingsPage from './pages/settings'
-import TerminalPage from './pages/terminal'
 import HelpPage from './pages/help'
 import PaymentLinkPage from './pages/payment-link'
 import PayAndOwnPage from './pages/pay-and-own'
@@ -37,7 +36,6 @@ export default function App() {
       <Route path="/subscriptions" element={guarded(<SubscriptionsPage />)} />
       <Route path="/activity" element={guarded(<ActivityPage />)} />
       <Route path="/settings" element={guarded(<SettingsPage />)} />
-      <Route path="/terminal" element={guarded(<TerminalPage />)} />
       <Route path="/help" element={guarded(<HelpPage />)} />
       <Route path="/payment-link" element={guarded(<PaymentLinkPage />)} />
       <Route path="/pay-and-own" element={guarded(<PayAndOwnPage />)} />

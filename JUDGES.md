@@ -70,7 +70,7 @@ backend URL, another network, secrets like the RPC or Pimlico key).
 |---|---|
 | `contracts/` | Foundry: FluxPay settle, StreamVault, UsernameRegistry, PaymentLinkEscrow, EarnVault + MockYieldStrategy, InvestVault + MockEquityVenue + StockToken (50 tests) |
 | `backend/` | Express + Postgres: auth, payment intents, payment links (conditions, verification), activity watcher, WebSocket gateway, AA (Pimlico) proxy, demo faucet |
-| `frontend/` | React + Vite: onboarding, dashboard, send, streams, payment links, earn, invest, swap, activity, terminal |
+| `frontend/` | React + Vite: onboarding, dashboard, send, streams, payment links, earn, invest, swap, activity |
 | `deployments/10143.json` | Deployed contract addresses (Monad testnet) |
 
 ## 5. Deployed contracts (Monad testnet)
