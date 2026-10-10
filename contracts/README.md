@@ -24,6 +24,9 @@ Requires Foundry (`forge`) and Solidity 0.8.28 (see `foundry.toml`).
 | `src/PaymentLinkEscrow.sol` | Recipient-bound claim links with ephemeral-key proofs |
 | `src/EarnVault.sol` | ERC-4626 vault with a swappable yield strategy |
 | `src/MockYieldStrategy.sol` | Testnet yield source (fixed rate, reserve-capped, vault-only) |
+| `src/InvestVault.sol` | Pay & Invest: per-user equity positions, swappable venue |
+| `src/MockEquityVenue.sol` | Testnet venue: USDC <-> simulated stock at the Pyth price |
+| `src/StockToken.sol` | Simulated equity token (venue-only mint/burn) |
 | `src/mocks/MockUSDC.sol` | Testnet-only mock (open mint) — never deploy to mainnet |
 
 ## Deploy
@@ -31,6 +34,7 @@ Requires Foundry (`forge`) and Solidity 0.8.28 (see `foundry.toml`).
 ```bash
 PRIVATE_KEY=0x... forge script script/Deploy.s.sol --rpc-url monad_testnet --broadcast
 PRIVATE_KEY=0x... EARN_YIELD_SEED=5000000 forge script script/DeployEarn.s.sol --rpc-url monad_testnet --broadcast
+PRIVATE_KEY=0x... forge script script/DeployInvest.s.sol --rpc-url monad_testnet --broadcast
 ```
 
 Recorded addresses live in `../deployments/10143.json`.

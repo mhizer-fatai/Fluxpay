@@ -204,6 +204,9 @@ button,a,input,select,textarea { font:inherit; } a { color:inherit; text-decorat
 .su-support{font-size:12px;color:#767b78;margin:8px 0 0;max-width:560px;line-height:1.5}
 .su-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 .su-card{background:#fff;border:1px solid var(--line);border-radius:var(--radius-ui);padding:22px}
+.su-invest-row{display:flex;gap:6px;flex-wrap:wrap}
+.su-invest-row button{font-size:11px;font-weight:600;color:#111;background:#fff;border:1px solid var(--line);border-radius:var(--radius-ui);padding:6px 12px;cursor:pointer}
+.su-invest-row button.on{background:#111;color:#fff;border-color:#111}
 .su-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px}
 .su-section-head h2{font-size:15px;font-weight:600;margin:0;color:#111}
 .su-section-head p{font-size:11px;color:#767b78;margin:4px 0 0}

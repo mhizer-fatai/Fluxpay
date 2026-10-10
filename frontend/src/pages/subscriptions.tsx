@@ -5,7 +5,7 @@ import { DashboardShell } from '@/components/dashboard-shell'
 import { SmartWalletGate } from '@/components/guard'
 import { useWallet } from '@/hooks/useWallet'
 import { listStreams, type StreamRow } from '@/lib/streams'
-import { erc20Abi, getUsdPrices, STREAM_VAULT_ADDRESS, streamVaultAbi, TOKENS, type TokenKey } from '@/lib/chain'
+import { erc20Abi, getUsdPrices, INVEST_VAULT_ADDRESS, investVaultAbi, STREAM_VAULT_ADDRESS, streamVaultAbi, TOKENS, type TokenKey } from '@/lib/chain'
 import { sendGasless, type GaslessCall } from '@/lib/gasless'
 import { resolveUsernameApi } from '@/lib/api'
 import { money, shortAddr, usdOf } from '@/lib/format'
@@ -31,7 +31,7 @@ function SubscriptionsContent() {
   const [busy, setBusy] = useState('')
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ recipient: '', amount: '', asset: 'USDC' as TokenKey, months: 1 })
+  const [form, setForm] = useState({ recipient: '', amount: '', asset: 'USDC' as TokenKey, months: 1, invest: true, investRate: 2 })
   const [prices, setPrices] = useState<Record<string, number> | null>(null)
 
   useEffect(() => { void getUsdPrices().then(setPrices).catch(() => {}) }, [])
@@ -59,6 +59,8 @@ function SubscriptionsContent() {
   const monthlySpend = owned.reduce((s, x) => s + (usdOf(x.monthly, x.token, prices) ?? 0), 0)
   const monthlyIncoming = incoming.reduce((s, x) => s + (usdOf(x.monthly, x.token, prices) ?? 0), 0)
   const funded = owned.reduce((s, x) => s + (usdOf(x.deposited, x.token, prices) ?? 0), 0)
+  const estBase = (parseFloat(form.amount) || 0) * Math.max(1, Math.floor(form.months))
+  const estSlice = form.invest && form.asset === 'USDC' ? (estBase * form.investRate) / 100 : 0
 
   const resolveRecipient = async (input: string): Promise<string | null> => {
     const v = input.trim()
@@ -112,26 +114,42 @@ function SubscriptionsContent() {
       // ratePerSecondX18 = rawMonthly * 1e18 / secondsPerMonth
       const rateX18 = (rawMonthly * 10n ** 18n) / BigInt(SECONDS_PER_MONTH)
       const initialDeposit = rawMonthly * BigInt(Math.max(1, Math.floor(form.months)))
-      await submitCalls(
-        [
+      // "Invest & Own": a slice of the prefunded stream buys a tokenized-equity position
+      // (USDC streams only) in the SAME sponsored userOp — the merchant still gets 100%.
+      const investOn = form.invest && form.asset === 'USDC' && INVEST_VAULT_ADDRESS
+      const investSlice = investOn ? (initialDeposit * BigInt(form.investRate)) / 100n : 0n
+      const calls = [
+        {
+          to: token.address!,
+          data: encodeFunctionData({
+            abi: erc20Abi, functionName: 'approve', args: [STREAM_VAULT_ADDRESS, initialDeposit],
+          }),
+        },
+        {
+          to: STREAM_VAULT_ADDRESS,
+          data: encodeFunctionData({
+            abi: streamVaultAbi, functionName: 'create',
+            args: [recipient as Address, token.address!, rateX18, initialDeposit],
+          }),
+        },
+      ]
+      if (investSlice > 0n) {
+        calls.push(
           {
             to: token.address!,
             data: encodeFunctionData({
-              abi: erc20Abi, functionName: 'approve', args: [STREAM_VAULT_ADDRESS, initialDeposit],
+              abi: erc20Abi, functionName: 'approve', args: [INVEST_VAULT_ADDRESS, investSlice],
             }),
           },
           {
-            to: STREAM_VAULT_ADDRESS,
-            data: encodeFunctionData({
-              abi: streamVaultAbi, functionName: 'create',
-              args: [recipient as Address, token.address!, rateX18, initialDeposit],
-            }),
+            to: INVEST_VAULT_ADDRESS,
+            data: encodeFunctionData({ abi: investVaultAbi, functionName: 'invest', args: [investSlice] }),
           },
-        ],
-        'Creating stream…',
-      )
+        )
+      }
+      await submitCalls(calls, investSlice > 0n ? 'Creating stream + investing…' : 'Creating stream…')
       setAddOpen(false)
-      setForm({ recipient: '', amount: '', asset: 'USDC', months: 1 })
+      setForm({ recipient: '', amount: '', asset: 'USDC', months: 1, invest: true, investRate: 2 })
       setNotice('Stream created')
       void refresh(true)
     } catch (e) {
@@ -261,9 +279,29 @@ function SubscriptionsContent() {
             <label>Pre-fund (months)</label>
             <input type="number" min={1} step={1} value={form.months} onChange={e => setForm({ ...form, months: Number(e.target.value) })} />
           </div>
+          <div className="su-field">
+            <label>Invest &amp; Own</label>
+            <div className="su-invest-row">
+              <button type="button" className={form.invest && form.asset === 'USDC' ? 'on' : ''} onClick={() => setForm({ ...form, invest: !form.invest })}>
+                {form.invest ? 'On' : 'Off'}
+              </button>
+              {[1, 2, 5].map(r => (
+                <button type="button" key={r} className={form.invest && form.asset === 'USDC' && form.investRate === r ? 'on' : ''} onClick={() => setForm({ ...form, invest: true, investRate: r })}>
+                  {r}%
+                </button>
+              ))}
+            </div>
+            <p className="su-hint">
+              {form.asset !== 'USDC'
+                ? 'Invest & Own applies to USDC streams.'
+                : form.invest
+                  ? `${form.investRate}% of your prefund (≈${estSlice.toFixed(2)} USDC) buys NVDAx — simulated on testnet, priced by Pyth — yours to keep or sell.`
+                  : 'Route a slice of each payment into a tokenized-equity position.'}
+            </p>
+          </div>
           <div className="su-estimate">
-            <span>Upfront cost (amount × months + gas)</span>
-            <strong>{((parseFloat(form.amount) || 0) * Math.max(1, Math.floor(form.months))).toFixed(2)} {form.asset}</strong>
+            <span>Upfront cost (amount × months{estSlice > 0 ? ' + invest' : ''} + gas)</span>
+            <strong>{(estBase + estSlice).toFixed(2)} {form.asset}</strong>
           </div>
           {busy && <p style={{ color: '#6b7280', fontSize: 12 }}>{busy}</p>}
           {error && <p style={{ color: '#ef4444', fontSize: 12 }}>{error}</p>}

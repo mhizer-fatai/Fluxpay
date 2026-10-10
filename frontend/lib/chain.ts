@@ -112,6 +112,7 @@ export const tokenByAddressOrNative = (addr: string): TokenInfo | undefined =>
 
 const erc20AbiBase = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'string' }] },
   { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint8' }] },
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] },
   { type: 'function', name: 'allowance', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
@@ -197,6 +198,25 @@ export const linkEscrowAbi = [
 
 /** EarnVault (ERC-4626) — deposit idle USDC, shares appreciate as the yield strategy earns. */
 export const EARN_VAULT_ADDRESS = import.meta.env.VITE_EARN_VAULT_ADDRESS as Address
+
+/** Pay & Invest — USDC goes in, a tokenized-equity position comes out (simulated on testnet). */
+export const INVEST_VAULT_ADDRESS = import.meta.env.VITE_INVEST_VAULT_ADDRESS as Address
+export const STOCK_TOKEN_ADDRESS = import.meta.env.VITE_STOCK_TOKEN_ADDRESS as Address
+export const EQUITY_VENUE_ADDRESS = import.meta.env.VITE_EQUITY_VENUE_ADDRESS as Address
+
+export const investVaultAbi = [
+  { type: 'function', name: 'invest', stateMutability: 'nonpayable', inputs: [{ name: 'usdcAmount', type: 'uint256' }], outputs: [{ name: 'stockOut', type: 'uint256' }] },
+  { type: 'function', name: 'divest', stateMutability: 'nonpayable', inputs: [{ name: 'stockAmount', type: 'uint256' }], outputs: [{ name: 'usdcOut', type: 'uint256' }] },
+  { type: 'function', name: 'stockOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'positionValueX18', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'totalStock', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'venue', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+] as const
+
+export const equityVenueAbi = [
+  { type: 'function', name: 'priceX18', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'priceSource', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'string' }] },
+] as const
 
 export const earnVaultAbi = [
   { type: 'function', name: 'asset', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
