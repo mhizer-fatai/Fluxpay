@@ -4,16 +4,12 @@
 services:
   - type: web
     name: fluxpay-backend
-    runtime: node
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     plan: free
-    rootDir: .
-    buildCommand: npm ci && npm run build -w backend
-    startCommand: node backend/dist/index.js
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - key: NODE_VERSION
-        value: "20"
       # Public config with sane defaults is baked into the code; only secrets and
       # environment-specific values are set here.
       - key: CORS_ORIGINS

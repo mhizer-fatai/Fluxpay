@@ -1,0 +1,15 @@
+# Keep the Docker build context small — dependencies and build output are produced
+# inside the image, never copied from the developer machine.
+node_modules
+**/node_modules
+dist
+**/dist
+contracts/out
+contracts/cache
+contracts/lib
+.git
+.gitignore
+*.md
+.env
+**/.env
+**/.env.*
