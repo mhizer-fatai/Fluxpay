@@ -13,7 +13,7 @@ of what you pay into a tokenized-equity position you keep.
 
 | | |
 |---|---|
-| **Live app** | _deployment pending — run locally with the steps below (or see the hosted URL in the submission form)_ |
+| **Live app** | **https://fluxpay-monad.netlify.app** (backend deploy in progress — data features light up once the API is live) |
 | **No credentials needed** | Log in with any email / Google / X account (Privy). You choose a @username on first login. |
 | **No testnet funds needed** | Gas is sponsored (ERC-4337 + Pimlico). Test USDC comes from the in-app faucet. |
 
