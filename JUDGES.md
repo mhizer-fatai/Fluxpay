@@ -26,8 +26,10 @@ npm run dev -w backend            # http://localhost:8080
 npm run dev -w frontend           # http://localhost:5173
 ```
 
-`backend/.env` and `frontend/.env` are pre-filled with the deployed contract addresses in
-`deployments/10143.json`.
+`backend/.env` and `frontend/.env` are **optional**: the deployed contract addresses are
+hardcoded defaults in `frontend/lib/chain.ts` / `backend/src/config.ts`, and the frontend
+API URL defaults to `http://localhost:8080`. Set env vars only to override (deployed
+backend URL, another network, secrets like the RPC or Pimlico key).
 
 ## 2. The 60-second tour
 

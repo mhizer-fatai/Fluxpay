@@ -75,10 +75,13 @@ export const EXPLORER_URL = monadTestnet.blockExplorers?.default?.url ?? 'https:
 export const explorerTx = (hash: string) => `${EXPLORER_URL}/tx/${hash}`
 export const explorerAddress = (addr: string) => `${EXPLORER_URL}/address/${addr}`
 
-export const REGISTRY_ADDRESS = import.meta.env.VITE_USERNAME_REGISTRY_ADDRESS as Address
-export const FLUXPAY_ADDRESS = import.meta.env.VITE_FLUXPAY_ADDRESS as Address
-export const LINK_ESCROW_ADDRESS = import.meta.env.VITE_LINK_ESCROW_ADDRESS as Address
-export const STREAM_VAULT_ADDRESS = import.meta.env.VITE_STREAM_VAULT_ADDRESS as Address
+// Deployed FluxPay contracts on Monad testnet (see deployments/10143.json).
+// These are public, immutable addresses — hardcoded defaults with an env override
+// for other networks (VITE_* is inlined at build time anyway).
+export const REGISTRY_ADDRESS = (import.meta.env.VITE_USERNAME_REGISTRY_ADDRESS || '0xAc34e4b98e7c765604551388B9EA082CD26556E2') as Address
+export const FLUXPAY_ADDRESS = (import.meta.env.VITE_FLUXPAY_ADDRESS || '0x3148a4deeEF4642cfA68CF2b0F35FDd62e98CF7E') as Address
+export const LINK_ESCROW_ADDRESS = (import.meta.env.VITE_LINK_ESCROW_ADDRESS || '0x47C659745F4FFc7458314c657622557A85540434') as Address
+export const STREAM_VAULT_ADDRESS = (import.meta.env.VITE_STREAM_VAULT_ADDRESS || '0x3791a605a5ED68e9e7923796Fd71ADE40E77Da13') as Address
 
 export type TokenKey = 'MON' | 'USDC' | 'AUSD' | 'WETH' | 'WMON' | 'KUSDC'
 
@@ -93,10 +96,10 @@ export interface TokenInfo {
 
 export const TOKENS: TokenInfo[] = [
   { key: 'MON', symbol: 'MON', name: 'Monad', decimals: 18, address: null, stable: false },
-  { key: 'USDC', symbol: 'USDC', name: 'USD Coin', decimals: 6, address: import.meta.env.VITE_USDC_ADDRESS as Address, stable: true },
-  { key: 'AUSD', symbol: 'AUSD', name: 'Aperture USD', decimals: 6, address: import.meta.env.VITE_AUSD_ADDRESS as Address, stable: true },
-  { key: 'WETH', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, address: import.meta.env.VITE_WETH_ADDRESS as Address, stable: false },
-  { key: 'WMON', symbol: 'WMON', name: 'Wrapped Monad', decimals: 18, address: import.meta.env.VITE_WMON_ADDRESS as Address, stable: false },
+  { key: 'USDC', symbol: 'USDC', name: 'USD Coin', decimals: 6, address: (import.meta.env.VITE_USDC_ADDRESS || '0x534b2f3A21130d7a60830c2Df862319e593943A3') as Address, stable: true },
+  { key: 'AUSD', symbol: 'AUSD', name: 'Aperture USD', decimals: 6, address: (import.meta.env.VITE_AUSD_ADDRESS || '0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC') as Address, stable: true },
+  { key: 'WETH', symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, address: (import.meta.env.VITE_WETH_ADDRESS || '0x45477f4709771331db81944A5E20eF95Bc7BA2D7') as Address, stable: false },
+  { key: 'WMON', symbol: 'WMON', name: 'Wrapped Monad', decimals: 18, address: (import.meta.env.VITE_WMON_ADDRESS || '0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541') as Address, stable: false },
   { key: 'KUSDC', symbol: 'kUSDC', name: 'Kuru Testnet USDC', decimals: 6, address: '0xa402b424f392eaa05dbc8779e4502a1f6a96fef1', stable: true },
 ]
 
@@ -197,12 +200,12 @@ export const linkEscrowAbi = [
 ] as const
 
 /** EarnVault (ERC-4626) — deposit idle USDC, shares appreciate as the yield strategy earns. */
-export const EARN_VAULT_ADDRESS = import.meta.env.VITE_EARN_VAULT_ADDRESS as Address
+export const EARN_VAULT_ADDRESS = (import.meta.env.VITE_EARN_VAULT_ADDRESS || '0x740E816C586600769b89f0cbb6A7Ba5cFb7b1D30') as Address
 
 /** Pay & Invest — USDC goes in, a tokenized-equity position comes out (simulated on testnet). */
-export const INVEST_VAULT_ADDRESS = import.meta.env.VITE_INVEST_VAULT_ADDRESS as Address
-export const STOCK_TOKEN_ADDRESS = import.meta.env.VITE_STOCK_TOKEN_ADDRESS as Address
-export const EQUITY_VENUE_ADDRESS = import.meta.env.VITE_EQUITY_VENUE_ADDRESS as Address
+export const INVEST_VAULT_ADDRESS = (import.meta.env.VITE_INVEST_VAULT_ADDRESS || '0x9Ccf20a778e887965551ABfF5bc676fb4E460f0e') as Address
+export const STOCK_TOKEN_ADDRESS = (import.meta.env.VITE_STOCK_TOKEN_ADDRESS || '0x37D6466f2F827e687578a2454dFB101b24512Df1') as Address
+export const EQUITY_VENUE_ADDRESS = (import.meta.env.VITE_EQUITY_VENUE_ADDRESS || '0x57762958eDd1d584b4A5FDC4C5A925Cf1261fFaA') as Address
 
 export const investVaultAbi = [
   { type: 'function', name: 'invest', stateMutability: 'nonpayable', inputs: [{ name: 'usdcAmount', type: 'uint256' }], outputs: [{ name: 'stockOut', type: 'uint256' }] },

@@ -7,8 +7,8 @@ import { ProfileProvider } from '@/hooks/profile'
 import './index.css'
 import App from './App'
 
-const privyAppId = import.meta.env.VITE_PRIVY_APP_ID as string | undefined
-if (!privyAppId) throw new Error('Missing VITE_PRIVY_APP_ID — check frontend/.env')
+// Public app id (ships in the browser bundle either way) — env override kept for other apps.
+const privyAppId = (import.meta.env.VITE_PRIVY_APP_ID || 'cmuamdld600480cjtff83vl6j') as string
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
