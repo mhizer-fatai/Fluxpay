@@ -1,0 +1,15 @@
+# Netlify configuration for the FluxPay frontend (monorepo built with npm workspaces).
+[build]
+  # Run the frontend workspace build from the repo root (npm workspaces live here).
+  command = "npm run build -w frontend"
+  publish = "frontend/dist"
+
+[build.environment]
+  # The repo requires Node >= 20; Netlify's default can be older.
+  NODE_VERSION = "20"
+
+# Single-page app: every client-side route (dashboard, /pay links, …) serves index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
