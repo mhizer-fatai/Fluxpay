@@ -13,9 +13,13 @@ of what you pay into a tokenized-equity position you keep.
 
 | | |
 |---|---|
-| **Live app** | **https://fluxpay-monad.netlify.app** (backend deploy in progress — data features light up once the API is live) |
+| **Live app** | **https://fluxpay-monad.netlify.app** |
+| **Live API** | **https://fluxpay-monad.onrender.com** (`/health` → `{"ok":true,"chainId":10143}`) |
 | **No credentials needed** | Log in with any email / Google / X account (Privy). You choose a @username on first login. |
 | **No testnet funds needed** | Gas is sponsored (ERC-4337 + Pimlico). Test USDC comes from the in-app faucet. |
+
+> The backend runs on Render's free tier and sleeps after ~15 minutes idle — the first
+> request can take 30–60s while it wakes. Refresh if the dashboard looks empty on first load.
 
 ### Run locally (2 minutes)
 
