@@ -4,11 +4,10 @@ import { createSmartAccountClient } from 'permissionless/clients'
 import { createPimlicoClient } from 'permissionless/clients/pimlico'
 import { toSimpleSmartAccount } from 'permissionless/accounts'
 import { erc20Abi, FLUXPAY_ADDRESS, fluxPayAbi, monadTestnet, type TokenInfo } from './chain'
-import { getAuthToken } from './api'
+import { API_URL, getAuthToken } from './api'
 
 const ENTRYPOINT_V06 = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' as Address // verified live via Pimlico eth_supportedEntryPoints
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 // Pimlico is reached ONLY through our authenticated backend proxy, so the API key
 // never ships in the browser bundle or appears in DevTools network requests.
 const PIMLICO_PROXY_URL = `${API_URL}/api/v1/aa/rpc`

@@ -6,7 +6,7 @@ import { Bell, Bot, CalendarDays, ChevronDown, CircleHelp, CreditCard, LayoutDas
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
 import { fetchActivity } from '@/lib/activity'
-import { resolveUsernameApi, checkUsername, getAuthToken } from '@/lib/api'
+import { resolveUsernameApi, checkUsername, getAuthToken, API_URL } from '@/lib/api'
 import { money, initials, shortAddr, timeAgo } from '@/lib/format'
 import { EXPLORER_URL } from '@/lib/chain'
 
@@ -84,7 +84,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   // Retries with backoff: the backend restarts on deploys and Redis may be down.
   useEffect(() => {
     if (!address) return
-    const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/^http/, 'ws')
+    const wsUrl = API_URL.replace(/^http/, 'ws')
     let socket: WebSocket | null = null
     let closed = false
     let attempts = 0

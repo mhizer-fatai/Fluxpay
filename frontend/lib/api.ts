@@ -1,4 +1,14 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+const isLocalHost = typeof window !== 'undefined'
+  && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname)
+
+/**
+ * API base URL. Explicit env override wins; local dev talks to the local backend;
+ * any hosted deployment talks to the deployed backend. (The URL is public config,
+ * so it lives here as a default rather than requiring a build-time variable.)
+ */
+export const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (isLocalHost ? 'http://localhost:8080' : 'https://fluxpay-monad.onrender.com')
 
 /** Typed API failure: `status` is HTTP (0 = never reached the backend), `code` is the backend error/reason. */
 export class ApiError extends Error {

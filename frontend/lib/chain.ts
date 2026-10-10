@@ -1,4 +1,5 @@
 import { createPublicClient, defineChain, formatUnits, http, keccak256, toHex, type Address, type Chain } from 'viem'
+import { API_URL } from './api'
 
 export const monadTestnet: Chain = defineChain({
   id: 10143,
@@ -255,7 +256,6 @@ export const shortenAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.sl
 let priceCache: { at: number; prices: Record<TokenKey, number> } | null = null
 export async function getUsdPrices(): Promise<Record<TokenKey, number>> {
   if (priceCache && Date.now() - priceCache.at < 5 * 60 * 1000) return priceCache.prices
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
   const prices: Record<TokenKey, number> = { MON: 0, USDC: 1, AUSD: 1, WETH: 0, WMON: 0, KUSDC: 1 }
   try {
     const res = await fetch(`${API_URL}/api/v1/prices`)
