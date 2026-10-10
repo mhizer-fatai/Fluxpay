@@ -55,6 +55,19 @@ function requestHeaders(token: string | null, init?: RequestInit): HeadersInit {
   }
 }
 
+const API_TIMEOUT_MS = 20_000
+
+/** fetch with a hard timeout so a stalled request can never hang the UI. */
+async function timedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function toApiError(path: string, res: Response): Promise<ApiError> {
   let body: unknown = null
   try { body = await res.json() } catch { /* non-JSON body */ }
@@ -75,7 +88,7 @@ export async function api<T = unknown>(path: string, init?: RequestInit): Promis
     throw new ApiError(401, `token_unavailable: ${path}: ${err instanceof Error ? err.message : String(err)}`, 'token_unavailable')
   }
 
-  let res = await fetch(`${API_URL}${path}`, { ...init, headers: requestHeaders(token, init) })
+  let res = await timedFetch(`${API_URL}${path}`, { ...init, headers: requestHeaders(token, init) })
 
   // One bounded retry with a freshly acquired token on 401. Covers the case
   // where the token was stale but Privy can still mint a valid one.
@@ -84,7 +97,7 @@ export async function api<T = unknown>(path: string, init?: RequestInit): Promis
     try { fresh = await tokenRefresher() } catch { fresh = null }
     if (fresh && fresh !== token) {
       token = fresh
-      res = await fetch(`${API_URL}${path}`, { ...init, headers: requestHeaders(token, init) })
+      res = await timedFetch(`${API_URL}${path}`, { ...init, headers: requestHeaders(token, init) })
     }
   }
 

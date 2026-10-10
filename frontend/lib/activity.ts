@@ -351,8 +351,10 @@ async function scanRpc(address: string, lookback: number, tokens: Address[]): Pr
 export async function fetchActivity(
   address: string,
   lookback = 600,
-  opts?: { force?: boolean; tokenKeys?: TokenKey[] },
+  opts?: { force?: boolean; tokenKeys?: TokenKey[]; fast?: boolean },
 ): Promise<ActivityItem[]> {
+  // Notifications want the quick feed only — never wait on the slow RPC top-up scan.
+  if (opts?.fast) return fetchBackendActivity(address)
   const key = `${address.toLowerCase()}:${lookback}:${opts?.tokenKeys?.join(',') ?? 'all'}`
   const cached = activityCache.get(key)
   if (!opts?.force && cached && Date.now() - cached.at < ACTIVITY_TTL_MS) return cached.items

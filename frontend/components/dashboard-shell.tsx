@@ -5,7 +5,7 @@ import { useLayoutEffect, useRef, useState, Fragment, useEffect } from 'react'
 import { Bell, CalendarDays, ChevronDown, CircleHelp, CreditCard, LayoutDashboard, Search, Send, Settings, Sparkles, Wallet, WalletMinimal, ArrowLeftRight, Activity, Link2, Landmark, type LucideIcon } from 'lucide-react'
 import { useProfile } from '@/hooks/profile'
 import { useWallet } from '@/hooks/useWallet'
-import { fetchActivity } from '@/lib/activity'
+import { fetchActivity, type ActivityItem } from '@/lib/activity'
 import { resolveUsernameApi, checkUsername, getAuthToken, API_URL } from '@/lib/api'
 import { money, initials, shortAddr, timeAgo } from '@/lib/format'
 import { EXPLORER_URL } from '@/lib/chain'
@@ -13,6 +13,74 @@ import { EXPLORER_URL } from '@/lib/chain'
 type NavItem = { label: string; href: string; icon: LucideIcon; group: string; description: string; soon?: boolean }
 
 interface NotifItem { id: string; title: string; body: string; time: string; read: boolean }
+
+/** Human titles for every on-chain event the feed can contain. */
+const EVENT_TITLES: Record<string, string> = {
+  StreamOpened: 'Stream started',
+  StreamWithdrawn: 'Stream withdrawal',
+  StreamTopUp: 'Stream topped up',
+  StreamCancelled: 'Stream cancelled',
+  StreamPaused: 'Stream paused',
+  StreamResumed: 'Stream resumed',
+  LinkCreated: 'Payment link created',
+  LinkClaimed: 'Payment link claimed',
+  LinkRefunded: 'Payment link refunded',
+  UsernameRegistered: 'Username registered',
+}
+
+/** Live WebSocket events → notification titles. */
+const liveTitle = (type: string | undefined, incoming: boolean): string => {
+  switch (type) {
+    case 'payment_settled': return incoming ? 'Payment received' : 'Payment sent'
+    case 'batch_settled': return 'Batch payment sent'
+    case 'token_transfer': return incoming ? 'Received' : 'Sent'
+    case 'wrap': return 'Swapped MON to WMON'
+    case 'unwrap': return 'Swapped WMON to MON'
+    case 'stream_opened': return 'Stream started'
+    case 'stream_withdrawn': return 'Stream withdrawal'
+    case 'stream_topup': return 'Stream topped up'
+    case 'stream_paused': return 'Stream paused'
+    case 'stream_resumed': return 'Stream resumed'
+    case 'stream_cancelled': return 'Stream cancelled'
+    case 'link_created': return 'Payment link created'
+    case 'link_claimed': return 'Payment link claimed'
+    case 'link_refunded': return 'Payment link refunded'
+    case 'username_registered': return 'Username registered'
+    default: return 'Activity'
+  }
+}
+
+const shortParty = (v: string) => (v && /^0x[a-fA-F0-9]{40}$/.test(v) ? shortAddr(v) : v)
+
+/** Notification copy for a feed item: sent, received, swapped, streamed, links, names. */
+const notifyFor = (i: ActivityItem): NotifItem => {
+  const amount = i.amount
+    ? `${i.kind === 'received' ? '+' : '−'}${i.amount.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${i.token ?? ''}`.trim()
+    : ''
+  const party = shortParty(i.counterparty)
+  let title: string
+  switch (i.category) {
+    case 'Swap':
+      title = i.event === 'Wrap' ? 'Swapped MON to WMON' : 'Swapped WMON to MON'
+      break
+    case 'Stream':
+    case 'Payment Link':
+      title = EVENT_TITLES[i.event] ?? `${i.category} update`
+      break
+    case 'Account':
+      title = 'Username registered'
+      break
+    case 'Payment':
+      title = i.kind === 'received' ? 'Payment received' : 'Payment sent'
+      break
+    default:
+      title = i.kind === 'received' ? 'Received' : 'Sent'
+  }
+  const body = i.category === 'Account'
+    ? party
+    : `${amount}${party ? ` ${i.kind === 'received' ? 'from' : 'to'} ${party}` : ''}`.trim()
+  return { id: i.hash, title, body, time: timeAgo(i.ts), read: false }
+}
 
 const nav: NavItem[] = [
   { label: 'Overview', href: '/dashboard', icon: LayoutDashboard, group: 'Main', description: 'Your account at a glance' },
@@ -107,15 +175,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           const msg = JSON.parse(ev.data as string) as { type?: string; txHash?: string; amount?: number; tokenLabel?: string; from?: string; to?: string; username?: string }
           if (!msg.txHash) return
           const id = `${msg.type}:${msg.txHash}`
-          const item: NotifItem = msg.type === 'username_registered'
-            ? { id, title: 'Username registered', body: `@${msg.username} is now yours on-chain`, time: 'Just now', read: false }
-            : {
-                id,
-                title: msg.type === 'payment_settled' && msg.to?.toLowerCase() === address.toLowerCase() ? 'Payment received' : 'Payment sent',
-                body: `${msg.type === 'payment_settled' && msg.to?.toLowerCase() === address.toLowerCase() ? '+' : '−'}${msg.amount ?? '?'} ${msg.tokenLabel ?? ''} ${msg.to?.toLowerCase() === address.toLowerCase() ? `from ${shortAddr(msg.from ?? '')}` : `to ${shortAddr(msg.to ?? '')}`}`,
-                time: 'Just now',
-                read: false,
-              }
+          const incoming = msg.to?.toLowerCase() === address.toLowerCase()
+          const title = liveTitle(msg.type, incoming)
+          const amount = typeof msg.amount === 'number'
+            ? `${incoming ? '+' : '−'}${msg.amount.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${msg.tokenLabel ?? ''}`.trim()
+            : ''
+          const party = msg.type === 'username_registered'
+            ? `@${msg.username ?? ''}`
+            : shortAddr((incoming ? msg.from : msg.to) ?? '')
+          const body = msg.type === 'username_registered'
+            ? `@${msg.username ?? ''} is now yours on-chain`
+            : `${amount}${party ? ` ${incoming ? 'from' : 'to'} ${party}` : ''}`.trim()
+          const item: NotifItem = { id, title, body, time: 'Just now', read: false }
           setNotifications(prev => (prev.some(n => n.id === id) ? prev : [item, ...prev].slice(0, 12)))
         } catch { /* ignore malformed frames */ }
       }
@@ -141,19 +212,16 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     if (notifLoaded.current || !address) return
     notifLoaded.current = true
     setNotifLoading(true)
-    fetchActivity(address)
+    // Fast path: the backend feed only — never blocked by the slow RPC top-up scan.
+    fetchActivity(address, 600, { fast: true })
       .then(items => {
-        setNotifications(
-          items.slice(0, 8).map(i => ({
-            id: i.hash,
-            title: i.kind === 'received' ? 'Payment received' : 'Payment sent',
-            body: `${i.kind === 'received' ? '+' : '−'}${i.amount.toFixed(4)} ${i.token ?? ''} ${i.kind === 'received' ? 'from' : 'to'} ${shortAddr(i.counterparty)}`,
-            time: timeAgo(i.ts),
-            read: false,
-          })),
-        )
+        const fresh = items.slice(0, 12).map(notifyFor)
+        setNotifications(prev => {
+          const seen = new Set(fresh.map(n => n.id))
+          return [...fresh, ...prev.filter(n => !seen.has(n.id))].slice(0, 12)
+        })
       })
-      .catch(() => setNotifications([]))
+      .catch(() => { /* keep whatever the live feed already pushed */ })
       .finally(() => setNotifLoading(false))
   }
 
