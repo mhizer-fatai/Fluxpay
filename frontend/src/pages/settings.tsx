@@ -50,7 +50,7 @@ export default function SettingsPage() {
 
   const prefs = loadPrefs()
   const [rate, setRate] = useState<number>(prefs.rate ?? 2)
-  const [notif, setNotif] = useState<Record<string, boolean>>({ tx: true, payment: true, investment: true, subscription: true, portfolio: true, product: false, ...(prefs.notif ?? {}) })
+  const [notif, setNotif] = useState<Record<string, boolean>>({ tx: true, payment: true, subscription: true, portfolio: true, product: false, ...(prefs.notif ?? {}) })
   const [theme, setTheme] = useState(prefs.theme ?? 'Dark')
 
   useEffect(() => {
@@ -151,7 +151,7 @@ export default function SettingsPage() {
       </Section>
 
       <Section icon={Bell} title="Notifications">
-        {[['tx', 'Transaction confirmations'], ['payment', 'Payment received'], ['investment', 'Investment executed'], ['subscription', 'Subscription investment'], ['product', 'Product updates']].map(([k, label]) => (
+        {[['tx', 'Transaction confirmations'], ['payment', 'Payment received'], ['subscription', 'Subscriptions'], ['product', 'Product updates']].map(([k, label]) => (
           <Row title={label} key={k}><Toggle on={notif[k] !== false} onChange={() => flipNotif(k)} /></Row>
         ))}
         <Row title="Security alerts" desc="Always on"><Toggle on disabled /></Row>

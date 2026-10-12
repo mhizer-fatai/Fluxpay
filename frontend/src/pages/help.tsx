@@ -25,7 +25,7 @@ const faqs = [
   { q: 'What is FluxPay?', a: 'FluxPay is a non-custodial payments app on Monad: send, request, stream, swap, and earn on your balance.' },
   { q: 'How does Earn work?', a: 'Deposit USDC into the on-chain Earn vault. Your balance accrues every second and you can withdraw anytime.' },
   { q: 'Where do my funds live?', a: 'In your own smart account and the on-chain vault. FluxPay never holds your keys or your money.' },
-  { q: 'Can I change my investment percentage?', a: 'There is no automatic investing: the Earn tab lets you deposit and withdraw from the vault directly.' },
+  { q: 'How do subscriptions work?', a: 'Subscriptions are paid by the second: fund a stream once, pause or cancel anytime, and the unused amount comes back to you.' },
   { q: 'Can I pause a subscription?', a: 'Yes. Pausing a stream stops future accrual; the recipient keeps everything already accrued.' },
   { q: 'How do I send USDC?', a: 'Open Wallet → Send, select USDC, enter the recipient address and amount, then review and confirm the transaction.' },
   { q: 'What happens if I lose access to my wallet?', a: 'Your configured recovery methods can help you regain access to your FluxPay account.' },
@@ -168,7 +168,6 @@ export default function HelpPage() {
             <label>Issue type</label>
             <select defaultValue="Payment issue">
               <option>Payment issue</option>
-              <option>Investment issue</option>
               <option>Wallet issue</option>
               <option>Subscription issue</option>
               <option>Account/security issue</option>
