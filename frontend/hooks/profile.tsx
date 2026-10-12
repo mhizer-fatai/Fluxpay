@@ -16,7 +16,7 @@ interface ProfileCtx {
 const Ctx = createContext<ProfileCtx | null>(null)
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
-  const { ready, authenticated, address, smartAddress, getAccessToken, logout } = useWallet()
+  const { ready, authenticated, address, smartAddress, wallet, user, getAccessToken, logout } = useWallet()
   const [status, setStatus] = useState<ProfileStatus>('loading')
   const [profile, setProfile] = useState<Profile | null>(null)
   // True once the first profile resolution completes. Guards use it so a later
@@ -137,6 +137,21 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     }, 1000)
     return () => clearInterval(timer)
   }, [ready, authenticated, address, refresh])
+
+  // Self-heal: a session that never connected the embedded wallet (wallets list
+  // empty while the account HAS one) almost always reconnects after a fresh SDK
+  // init. Do that ONCE per tab, right after login — not when the user is about
+  // to send.
+  useEffect(() => {
+    if (!ready || !authenticated || !user?.wallet || wallet) return
+    if (sessionStorage.getItem('fluxpay_wallet_reload') === '1') return
+    const t = setTimeout(() => {
+      if (document.visibilityState !== 'visible') return
+      try { sessionStorage.setItem('fluxpay_wallet_reload', '1') } catch { /* ignore */ }
+      location.reload()
+    }, 10_000)
+    return () => clearTimeout(t)
+  }, [ready, authenticated, user, wallet])
 
   const completeOnboarding = useCallback(
     async (args: { username: string; fullName: string; email?: string }) => {

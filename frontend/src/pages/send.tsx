@@ -293,7 +293,7 @@ function SendContent() {
       const walletClient = await getWalletClient()
       if (!walletClient) {
         const diag = getWalletDiag()
-        throw new Error(`Your wallet is still starting up — wait a few seconds and tap Confirm & Send again.${diag ? ` [${diag}]` : ''}`)
+        throw new Error(`Your wallet isn't connected in this browser session — reload the page to reconnect.${diag ? ` [${diag}]` : ''}`)
       }
 
       if (!spendAddress) throw new Error('Account not ready — wait a moment and try again')
@@ -463,6 +463,9 @@ function SendContent() {
             <div className="sn-summary">{summary}</div>
             <p className="sn-warning">Transactions on the blockchain cannot be reversed once confirmed. Please verify the recipient before continuing.</p>
             {error && <p style={{ color: '#ef4444', fontSize: 13 }}>{error}</p>}
+            {error && /wallet/i.test(error) && (
+              <button className="ov-btn" style={{ marginTop: 8 }} onClick={() => location.reload()}>Reload page & retry</button>
+            )}
             <div className="sn-actions">
               <button className="ov-btn" onClick={() => setStep('form')} disabled={!!busy}>Back</button>
               <button className="ov-btn primary" onClick={confirmSend} disabled={!!busy}>{busy || 'Confirm & Send'}</button>

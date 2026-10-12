@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useProfile } from '../hooks/profile'
 import { useWallet } from '../hooks/useWallet'
@@ -49,11 +49,24 @@ export function RequireProfile({ children }: { children: ReactNode }) {
  */
 export function SmartWalletGate({ children }: { children: ReactNode }) {
   const { smartAddress } = useWallet()
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    if (smartAddress) { setSlow(false); return }
+    const t = setTimeout(() => setSlow(true), 12_000)
+    return () => clearTimeout(t)
+  }, [smartAddress])
   if (!smartAddress) {
     return (
       <DashboardShell>
         <section className="dashboard-content">
-          <Spinner label="Setting up your smart wallet…" />
+          {slow ? (
+            <div className="guard-loading">
+              <p style={{ margin: '0 0 12px' }}>Setting up your wallet is taking longer than expected.</p>
+              <button className="ov-btn primary" onClick={() => location.reload()}>Reload page</button>
+            </div>
+          ) : (
+            <Spinner label="Setting up your smart wallet…" />
+          )}
         </section>
       </DashboardShell>
     )
