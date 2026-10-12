@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePrivy, useWallets } from '@privy-io/react-auth'
 import { createWalletClient, custom, type WalletClient } from 'viem'
 import { monadTestnet } from '../lib/chain'
@@ -14,29 +14,58 @@ export function useWallet() {
   const isEmbedded = (w: { walletClientType?: string }) =>
     !w.walletClientType || w.walletClientType === 'privy' || w.walletClientType === 'embedded'
 
-  const embeddedWallets = wallets.filter(w => isEmbedded(w as { walletClientType?: string }))
+  // Live refs so getWalletClient can wait for the wallet to appear instead of
+  // failing the instant it is asked too early (fresh login / slow page load).
+  const walletsRef = useRef(wallets)
+  const userRef = useRef(user)
+  useEffect(() => { walletsRef.current = wallets }, [wallets])
+  useEffect(() => { userRef.current = user }, [user])
 
-  const privyWallet =
-    embeddedWallets.find(w => w.address && user?.wallet?.address && w.address.toLowerCase() === user.wallet.address.toLowerCase()) ??
-    embeddedWallets[0] ??
-    null
+  const pickEmbedded = useCallback(
+    (list: typeof wallets, u: typeof user): (typeof wallets)[number] | null => {
+      const embedded = list.filter(w => isEmbedded(w as { walletClientType?: string }))
+      return (
+        embedded.find(w => w.address && u?.wallet?.address && w.address.toLowerCase() === u.wallet.address.toLowerCase()) ??
+        embedded[0] ??
+        null
+      )
+    },
+    [],
+  )
+
+  const privyWallet = pickEmbedded(wallets, user)
 
   const address = (privyWallet?.address ?? user?.wallet?.address ?? null) as string | null
 
   const getWalletClient = useCallback(async (): Promise<WalletClient | null> => {
-    if (!privyWallet) return null
+    // Wait up to 10s for the embedded wallet to show up. Right after login (or
+    // on a fresh page load) the wallet list can still be empty while the user
+    // is already tapping through the app; failing instantly produced the
+    // confusing "wallet_unavailable" error on sends.
+    let w = pickEmbedded(walletsRef.current, userRef.current)
+    if (!w) {
+      const deadline = Date.now() + 10_000
+      while (!w && Date.now() < deadline) {
+        await new Promise<void>(r => setTimeout(r, 250))
+        w = pickEmbedded(walletsRef.current, userRef.current)
+      }
+    }
+    if (!w) return null
     try {
-      await privyWallet.switchChain(monadTestnet.id)
+      await w.switchChain(monadTestnet.id)
     } catch { /* already on chain or unsupported — proceed */ }
     try {
       // Privy ConnectedWallet exposes a viem wallet client
-      const wc = (privyWallet as unknown as { getWalletClient: (chain?: number) => Promise<WalletClient> })
-        .getWalletClient
-      if (typeof wc === 'function') return await (privyWallet as unknown as { getWalletClient: (chain?: number) => Promise<WalletClient> }).getWalletClient(monadTestnet.id)
+      const fn = (w as unknown as { getWalletClient?: (chain?: number) => Promise<WalletClient> }).getWalletClient
+      if (typeof fn === 'function') return await fn.call(w, monadTestnet.id)
     } catch { /* fall through to manual provider wrapper */ }
-    const provider = await (privyWallet as unknown as { getEthereumProvider: () => Promise<unknown> }).getEthereumProvider()
-    return createWalletClient({ chain: monadTestnet, transport: custom(provider as never) })
-  }, [privyWallet])
+    try {
+      const provider = await (w as unknown as { getEthereumProvider: () => Promise<unknown> }).getEthereumProvider()
+      return createWalletClient({ chain: monadTestnet, transport: custom(provider as never) })
+    } catch {
+      return null
+    }
+  }, [pickEmbedded])
 
   // The smart account is the ONLY money account in the UI: all balances, activity
   // and transactions are scoped to it. The EOA stays purely a signer underneath.
@@ -60,15 +89,23 @@ export function useWallet() {
     } catch { /* storage blocked — fall through to derivation */ }
     let alive = true
     void (async () => {
-      try {
-        const wc = await getWalletClient()
-        if (!wc || !alive) return
-        const { getGaslessAddress } = await import('../lib/gasless')
-        const sa = await getGaslessAddress(address as `0x${string}`, wc)
-        if (!alive) return
-        try { localStorage.setItem(`${SMART_CACHE_PREFIX}${eoa}`, sa) } catch { /* ignore */ }
-        setSmartAddress(sa)
-      } catch { /* sponsored path unavailable for this session */ }
+      // Retry while the wallet list finishes loading: a single failed attempt
+      // used to leave the gate spinning forever on a slow login.
+      for (let attempt = 0; alive && attempt < 5; attempt++) {
+        try {
+          const wc = await getWalletClient()
+          if (!alive) return
+          if (wc) {
+            const { getGaslessAddress } = await import('../lib/gasless')
+            const sa = await getGaslessAddress(address as `0x${string}`, wc)
+            if (!alive) return
+            try { localStorage.setItem(`${SMART_CACHE_PREFIX}${eoa}`, sa) } catch { /* ignore */ }
+            setSmartAddress(sa)
+            return
+          }
+        } catch { /* transient — retry below */ }
+        await new Promise<void>(r => setTimeout(r, 2500))
+      }
     })()
     return () => { alive = false }
   }, [address, getWalletClient])

@@ -62,7 +62,7 @@ function PortfolioContent() {
     try {
       setInvestBusy('Selling...')
       const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('wallet_unavailable')
+      if (!walletClient) throw new Error('Your wallet is still starting up — wait a few seconds and try again.')
       await sendGasless({
         walletClient,
         // The EOA signs; the smart account owns the position.

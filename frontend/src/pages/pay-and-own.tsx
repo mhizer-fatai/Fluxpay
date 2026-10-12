@@ -106,7 +106,7 @@ function EarnContent() {
   const submit = async (calls: Parameters<typeof sendGasless>[0]['calls'], label: string) => {
     if (!account || !ownerAddress) throw new Error('Wallet not ready')
     const walletClient = await getWalletClient()
-    if (!walletClient) throw new Error('wallet_unavailable')
+    if (!walletClient) throw new Error('Your wallet is still starting up — wait a few seconds and try again.')
     setTx({ state: 'pending', message: 'Transaction in progress…', detail: 'Confirm in your wallet' })
     const result = await sendGasless({
       walletClient,

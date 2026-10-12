@@ -78,7 +78,7 @@ function SubscriptionsContent() {
     if (!address) throw new Error('Wallet not ready')
     if (!ownerAddress) throw new Error('Wallet not ready')
     const walletClient = await getWalletClient()
-    if (!walletClient) throw new Error('wallet_unavailable')
+    if (!walletClient) throw new Error('Your wallet is still starting up — wait a few seconds and try again.')
     setBusy(statusMsg)
     const result = await sendGasless({
       walletClient,

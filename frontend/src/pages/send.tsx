@@ -279,8 +279,9 @@ function SendContent() {
       const to = await resolveRecipient()
       if (!to) return setError('Recipient must be a valid 0x address or a registered @username')
       setResolvedTo(to)
+      setBusy('Preparing your wallet…')
       const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('wallet_unavailable')
+      if (!walletClient) throw new Error('Your wallet is still starting up — wait a few seconds and tap Confirm & Send again.')
 
       if (!spendAddress) throw new Error('Account not ready — wait a moment and try again')
 

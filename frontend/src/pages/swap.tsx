@@ -87,9 +87,9 @@ function SwapContent() {
     if (!address) return setError('Wallet not ready — log in first.')
     if (!quote) return setError('No valid quote — adjust the amount.')
     try {
-      if (!wallet) throw new Error('wallet_unavailable')
+      if (!wallet) throw new Error('Your wallet is still starting up — wait a few seconds and try again.')
       const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('wallet_unavailable')
+      if (!walletClient) throw new Error('Your wallet is still starting up — wait a few seconds and try again.')
       const ethereumProvider = await (wallet as unknown as { getEthereumProvider: () => Promise<unknown> }).getEthereumProvider()
       const { txHash: hash, partialFill } = await executeSwap({
         walletClient,
