@@ -78,7 +78,7 @@ export default function SettingsPage() {
   }
 
   const signOut = () => {
-    void logout().finally(() => navigate('/auth'))
+    void logout().finally(() => navigate('/', { replace: true }))
   }
 
   const displayName = profile?.fullName || '—'
