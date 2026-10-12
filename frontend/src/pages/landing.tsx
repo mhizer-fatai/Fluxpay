@@ -29,7 +29,7 @@ export default function LandingPage() {
           <a href="#faqs">FAQs</a>
         </nav>
       </div>
-      <div><h1>Swap. <span className="text-orange">Send.</span><br/>Stream.</h1><p>FluxPay is a payments app on Monad. Swap tokens at live on-chain prices, send money to a friend by their @username, or set a payment to trickle every second — with no addresses to copy, no gas to buy, and no seed phrase to lose.</p><div className="hero-actions"><Link to="/auth" className="lime-button">Join FluxPay</Link></div></div>
+      <div><h1>Swap. <span className="text-orange">Send.</span><br/>Stream. <span className="text-orange">Earn.</span></h1><p>FluxPay is a payments app on Monad. Swap tokens at live on-chain prices, send money to a friend by their @username, or set a payment to trickle every second — with no addresses to copy, no gas to buy, and no seed phrase to lose.</p><div className="hero-actions"><Link to="/auth" className="lime-button">Join FluxPay</Link></div></div>
       <div className="hero-cards"><div className="card-ghost">fluxpay <span>◉</span></div><div className="card-dark">fluxpay <span>◉</span></div><div className="card-lime">fluxpay <span>◉</span></div></div>
     </section>
     <section className="landing-intro"><small className="feature-pill">FEATURES</small><h2>A money app that hides the chain.</h2><p className="intro-text">FluxPay sits in front of Monad's speed and keeps the plumbing out of the way. Sign in, get a balance, and start swapping, sending, and streaming — in seconds.</p></section>
