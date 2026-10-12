@@ -5,7 +5,7 @@ const features = [
   ['Swap', 'Trade tokens at live on-chain prices. On testnet, swap MON to WMON 1:1.'],
   ['Send', 'Send and request money with a @username or a shareable payment link.'],
   ['Streams', 'Pick an amount to flow per second, fund it once, and let it run — pause, resume, or cancel in a tap.'],
-  ['Activity', 'A live feed of every payment and stream tick, pulled straight from Monad.'],
+  ['Earn', 'Put idle USDC to work in the Earn vault — your balance accrues every second, withdraw anytime.'],
 ]
 
 const images = [
@@ -56,7 +56,7 @@ export default function LandingPage() {
             <a href="#how-it-works">How It Works</a>
             <a href="#features">Pay</a>
             <a href="#features">Streams</a>
-            <a href="#features">Activity</a>
+            <a href="#features">Earn</a>
             <a href="#features">Payment Links</a>
             <a href="#features">Swap</a>
             <a href="#features">Security</a>
@@ -77,7 +77,7 @@ export default function LandingPage() {
             <a href="#how-it-works">How It Works</a>
             <a href="#features">Pay</a>
             <a href="#features">Streams</a>
-            <a href="#features">Activity</a>
+            <a href="#features">Earn</a>
             <a href="#features">Swap</a>
           </div>
         </div>
