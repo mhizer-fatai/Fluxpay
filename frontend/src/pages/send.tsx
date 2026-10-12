@@ -7,7 +7,7 @@ import { SmartWalletGate } from '@/components/guard'
 import { Dropdown } from '@/components/dropdown'
 import { useProfile } from '@/hooks/profile'
 import { useBalances } from '@/hooks/useBalances'
-import { useWallet } from '@/hooks/useWallet'
+import { useWallet, getWalletDiag } from '@/hooks/useWallet'
 import { buildSettleCalls, getUserOpReceipt, sendGasless } from '@/lib/gasless'
 import { fetchActivity } from '@/lib/activity'
 import { getUsdPrices, TOKENS, type TokenKey } from '@/lib/chain'
@@ -133,6 +133,16 @@ function SendContent() {
   const amt = parseFloat(amount) || 0
   const usd = prices ? amt * (prices[assetSym] ?? 0) : 0
   const canContinue = recipient.trim().length > 3 && amt > 0 && amt <= balance
+
+  // What the summaries show for "To": the username exactly as typed (with @),
+  // or the raw address when an address was entered. The resolved hex address
+  // never replaces a username in the UI.
+  const displayRecipient = useMemo(() => {
+    const v = recipient.trim()
+    if (/^0x[a-fA-F0-9]{40}$/.test(v)) return v
+    const name = v.replace(/^@/, '')
+    return name ? `@${name}` : (resolvedTo ?? v)
+  }, [recipient, resolvedTo])
 
   useEffect(() => { void getUsdPrices().then(setPrices) }, [])
   useEffect(() => {
@@ -281,7 +291,10 @@ function SendContent() {
       setResolvedTo(to)
       setBusy('Preparing your wallet…')
       const walletClient = await getWalletClient()
-      if (!walletClient) throw new Error('Your wallet is still starting up — wait a few seconds and tap Confirm & Send again.')
+      if (!walletClient) {
+        const diag = getWalletDiag()
+        throw new Error(`Your wallet is still starting up — wait a few seconds and tap Confirm & Send again.${diag ? ` [${diag}]` : ''}`)
+      }
 
       if (!spendAddress) throw new Error('Account not ready — wait a moment and try again')
 
@@ -378,11 +391,11 @@ function SendContent() {
   const summary = useMemo(() => (
     <>
       <div className="sn-sum-row"><span>You&apos;re sending</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
-      <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{resolvedTo ?? recipient}</strong></div>
+      <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{displayRecipient}</strong></div>
       <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
       <div className="sn-sum-row sn-sum-total"><span>Total</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
     </>
-  ), [amt, asset.symbol, resolvedTo, recipient])
+  ), [amt, asset.symbol, displayRecipient])
 
   return <DashboardShell>
     <section className="dashboard-content sn">
@@ -465,7 +478,7 @@ function SendContent() {
               <p className="sn-hint">{busy || 'Waiting for confirmation on Monad…'}</p>
               <div className="sn-summary">
                 <div className="sn-sum-row"><span>Amount</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
-                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{resolvedTo ?? recipient}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{displayRecipient}</strong></div>
                 {userOpHash && (
                   <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{userOpHash}</strong></div>
                 )}
@@ -488,7 +501,7 @@ function SendContent() {
               <p className="sn-warning">Confirmation is taking longer than usual, but your transaction was submitted and may still land. <strong>Do not send again</strong> — that could transfer twice.</p>
               <div className="sn-summary">
                 <div className="sn-sum-row"><span>Amount</span><strong>{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</strong></div>
-                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{resolvedTo ?? recipient}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{displayRecipient}</strong></div>
                 {userOpHash && (
                   <div className="sn-sum-row"><span>UserOp</span><strong style={{ wordBreak: 'break-all' }}>{userOpHash}</strong></div>
                 )}
@@ -507,9 +520,9 @@ function SendContent() {
               <span className="sn-success-icon"><Check size={22} /></span>
               <h2>Transaction successful</h2>
               <p className="sn-success-amount">{amt.toLocaleString('en-US', { maximumFractionDigits: 6 })} {asset.symbol}</p>
-              <p className="sn-success-sub" style={{ wordBreak: 'break-all' }}>sent to {resolvedTo ?? recipient} · confirmed on Monad Testnet.</p>
+              <p className="sn-success-sub" style={{ wordBreak: 'break-all' }}>sent to {displayRecipient} · confirmed on Monad Testnet.</p>
               <div className="sn-summary">
-                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{resolvedTo ?? recipient}</strong></div>
+                <div className="sn-sum-row"><span>To</span><strong style={{ wordBreak: 'break-all' }}>{displayRecipient}</strong></div>
                 <div className="sn-sum-row"><span>Transaction</span><strong style={{ wordBreak: 'break-all' }}>{txHash ?? '—'}</strong></div>
                 <div className="sn-sum-row"><span>Network</span><strong>Monad Testnet</strong></div>
               </div>
