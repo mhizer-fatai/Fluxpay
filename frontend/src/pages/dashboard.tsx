@@ -124,7 +124,7 @@ function DashboardContent() {
         <div className="ov-card" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
           <div>
             <strong style={{ display: 'block', fontSize: 13 }}>Get 5 test USDC</strong>
-            <small style={{ color: '#767b78', fontSize: 11 }}>Fund your wallet to try sending, streams, and Pay &amp; Own. One claim per wallet.</small>
+            <small style={{ color: '#767b78', fontSize: 11 }}>Fund your wallet to try sending, streaming, and earning. One claim per wallet.</small>
             {faucetNotice && <small style={{ display: 'block', marginTop: 4, color: '#2a8a45', fontSize: 11 }}>{faucetNotice}</small>}
           </div>
           <button className="ov-btn primary" onClick={claimFaucet} disabled={!!faucetBusy}>{faucetBusy || 'Claim'}</button>
