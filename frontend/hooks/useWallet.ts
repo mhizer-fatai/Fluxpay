@@ -52,11 +52,15 @@ export function useWallet() {
     }
     if (!w) {
       const list = walletsRef.current
-      const uw = userRef.current?.wallet as { walletClientType?: string } | undefined
-      lastWalletDiag = `no-wallet list:${list.length} user:${uw ? (uw.walletClientType ?? '?') : 'none'}`
+      const u = userRef.current
+      const uw = u?.wallet ?? null
+      const linkedWallets = ((u?.linkedAccounts ?? []) as Array<{ type?: string; address?: string; walletClientType?: string; connectorType?: string; chainType?: string }>)
+        .filter(a => (a.type ?? '').includes('wallet'))
+      lastWalletDiag = `no-wallet list:${list.length} user:${uw ? ((uw as { walletClientType?: string }).walletClientType ?? '?') : 'none'} linked:${linkedWallets.length}`
       console.warn('[wallet] no embedded wallet after wait', {
         wallets: list.map(x => ({ address: x.address, type: (x as { walletClientType?: string }).walletClientType })),
-        userWallet: uw ?? null,
+        userWallet: uw,
+        linkedWallets,
       })
       return null
     }
