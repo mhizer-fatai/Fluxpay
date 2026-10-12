@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getEmbeddedConnectedWallet, usePrivy, useWallets } from '@privy-io/react-auth'
+import { getEmbeddedConnectedWallet, useConnectOrCreateWallet, usePrivy, useWallets } from '@privy-io/react-auth'
 import { createWalletClient, custom, type WalletClient } from 'viem'
 import { monadTestnet } from '../lib/chain'
 
@@ -10,9 +10,16 @@ const SMART_CACHE_PREFIX = 'fluxpay_smart:v1:'
 let lastWalletDiag = ''
 export function getWalletDiag() { return lastWalletDiag }
 
+// At most one connectOrCreateWallet() attempt per page load (a session that
+// never connected the embedded wallet only needs to be asked once).
+let autoConnectTried = false
+
 export function useWallet() {
   const { ready, authenticated, user, getAccessToken, logout } = usePrivy()
   const { wallets } = useWallets()
+  const { connectOrCreateWallet } = useConnectOrCreateWallet()
+  const connectRef = useRef(connectOrCreateWallet)
+  useEffect(() => { connectRef.current = connectOrCreateWallet }, [connectOrCreateWallet])
 
   // Live refs so getWalletClient can wait for the wallet to appear instead of
   // failing the instant it is asked too early (fresh login / slow page load).
@@ -44,9 +51,17 @@ export function useWallet() {
     // confusing "wallet_unavailable" error on sends.
     let w = pickEmbedded(walletsRef.current)
     if (!w) {
-      const deadline = Date.now() + 10_000
+      const started = Date.now()
+      const deadline = started + 10_000
       while (!w && Date.now() < deadline) {
         await new Promise<void>(r => setTimeout(r, 250))
+        // The account has an embedded wallet but the session never connected it
+        // (the [no-wallet list:0 user:privy] case). Ask Privy to connect it once.
+        if (!autoConnectTried && userRef.current?.wallet && Date.now() - started > 1200) {
+          autoConnectTried = true
+          console.info('[wallet] wallets list empty but the account has a wallet — calling connectOrCreateWallet()')
+          try { connectRef.current?.() } catch (e) { console.warn('[wallet] connectOrCreateWallet threw', e) }
+        }
         w = pickEmbedded(walletsRef.current)
       }
     }
