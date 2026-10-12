@@ -135,10 +135,14 @@ async function pricePrecisionOf(market: Address): Promise<bigint> {
 
 const WMON_FLUXPAY = '0xfb8bf4c1cc7a94c73d209a149ea2abea852bc541'
 
+/** Human-readable ABI for the ethers-based simulation path (ethers accepts raw strings). */
+const WRAP_ABI_HUMAN = ['function deposit() payable', 'function withdraw(uint256 amount)']
+
+/** Parsed ABI for viem encoding — viem cannot consume raw ABI strings. */
 const WRAP_ABI = [
-  'function deposit() payable',
-  'function withdraw(uint256 amount)',
-]
+  parseAbiItem('function deposit() payable'),
+  parseAbiItem('function withdraw(uint256 amount)'),
+] as const
 
 /** Is this pair a MON↔FluxPay-WMON wrap (always executable, 1:1, no liquidity needed)? */
 export function isWrapPair(from: KuruToken, to: KuruToken): 'wrap' | 'unwrap' | null {
@@ -259,7 +263,7 @@ export async function executeSwap(opts: {
 
   // Wrap path: MON↔WMON directly against the canonical wrapper (1:1, always executable).
   if (quote.kind === 'wrap') {
-    const wmon = new ethers.Contract(quote.market, WRAP_ABI, provider)
+    const wmon = new ethers.Contract(quote.market, WRAP_ABI_HUMAN, provider)
     const callData = quote.side === 'wrap'
       ? { to: quote.market, data: wmon.interface.encodeFunctionData('deposit'), value: ethers.BigNumber.from(quote.inputRaw.toString()), from: simulateFrom }
       : { to: quote.market, data: wmon.interface.encodeFunctionData('withdraw', [quote.inputRaw.toString()]), value: ethers.BigNumber.from(0), from: simulateFrom }
