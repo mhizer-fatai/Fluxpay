@@ -15,7 +15,7 @@ the second, earn yield on idle balance, and swap — no seed phrase, no gas, no 
 | **Live app** | **https://fluxpay-monad.netlify.app** |
 | **Live API** | **https://fluxpay-monad.onrender.com** (`/health` → `{"ok":true,"chainId":10143}`) |
 | **No credentials needed** | Log in with any email / Google / X account (Privy). You choose a @username on first login. |
-| **No testnet funds needed** | Gas is sponsored (ERC-4337 + Pimlico). Test USDC comes from the in-app faucet. |
+| **No gas needed** | Gas is sponsored (ERC-4337 + Pimlico) — transactions never ask for gas or testnet MON. |
 
 > The backend runs on Render's free tier and sleeps after ~15 minutes idle — the first
 > request can take 30–60s while it wakes. Refresh if the dashboard looks empty on first load.
@@ -37,8 +37,9 @@ backend URL, another network, secrets like the RPC or Pimlico key).
 ## 2. The 60-second tour
 
 1. **Join** — open the app, log in, pick a @username.
-2. **Get test USDC** — the dashboard shows a **“Get 5 test USDC”** button when your balance is
-   low. One click, no faucet hunting, no MON required.
+2. **Funds** — the demo accounts in the video are funded with test USDC. New accounts start
+   empty by design (no faucet button in the product UI); to try the flows yourself, contact the
+   team via the submission page and we'll fund your address.
 3. **Send** — Send → `@username` → amount → slide to send. Settlement is on-chain and gasless;
    watch the Activity feed update.
 4. **Subscriptions** — Subscriptions → New Stream → USDC, e.g. `15`/month, 1 month → Approve &
@@ -66,7 +67,7 @@ backend URL, another network, secrets like the RPC or Pimlico key).
 | Path | What |
 |---|---|
 | `contracts/` | Foundry: FluxPay settle, StreamVault, UsernameRegistry, PaymentLinkEscrow, EarnVault + MockYieldStrategy (50 tests) |
-| `backend/` | Express + Postgres: auth, payment intents, payment links (conditions, verification), activity watcher, WebSocket gateway, AA (Pimlico) proxy, demo faucet |
+| `backend/` | Express + Postgres: auth, payment intents, payment links (conditions, verification), activity watcher, WebSocket gateway, AA (Pimlico) proxy, test-USDC faucet (API-only) |
 | `frontend/` | React + Vite: onboarding, dashboard, send, streams, payment links, earn, swap, activity |
 | `deployments/10143.json` | Deployed contract addresses (Monad testnet) |
 
